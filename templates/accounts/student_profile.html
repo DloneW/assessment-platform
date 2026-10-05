@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Student profile{% endblock %}
+{% block content %}
+<h1>{{ profile.user.get_full_name }}</h1>
+<dl>
+  <dt>Student ID</dt><dd>{{ profile.student_id }}</dd>
+  <dt>Department</dt><dd>{{ profile.department.name }}</dd>
+  <dt>Level</dt><dd>{{ profile.level }}</dd>
+  <dt>Email</dt><dd>{{ profile.user.email }}</dd>
+</dl>
+<h2>Enrolled courses</h2>
+{% if courses %}
+<ul>{% for course in courses %}<li>{{ course.code }} &ndash; {{ course.title }}</li>{% endfor %}</ul>
+{% else %}
+<p>No enrollments.</p>
+{% endif %}
+{% endblock %}

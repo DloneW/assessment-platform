@@ -4,6 +4,8 @@ from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
 
+from authorization.roles import STUDENT, assign_role
+
 from .models import Course, Department, Level, StudentProfile
 
 User = get_user_model()
@@ -40,6 +42,7 @@ class BaseTestCase(TestCase):
             username=username, email=email, password=STRONG_PASSWORD,
             first_name=first_name, last_name=last_name,
         )
+        assign_role(user, STUDENT)  # same as registration does
         StudentProfile.objects.create(
             user=user, student_id=student_id,
             department=department or self.dept, level=level or self.level,
@@ -278,7 +281,7 @@ class CourseEnrollmentTests(BaseTestCase):
         through = StudentProfile.courses.through
         self.assertEqual(through.objects.count(), 1)
         with self.assertRaises(IntegrityError), transaction.atomic():
-            through.objects.create(studentprofile=profile, course=self.c1)  # DB-level guard
+            through.objects.create(student=profile, course=self.c1)  # DB-level guard
 
     def test_deleting_student_removes_enrollments_but_keeps_course(self):
         user = self.make_student()

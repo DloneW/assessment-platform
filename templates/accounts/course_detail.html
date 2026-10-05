@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ course.code }}{% endblock %}
+{% block content %}
+<h1>{{ course.code }} &ndash; {{ course.title }}</h1>
+<dl>
+  <dt>Department</dt><dd>{{ course.department.name }}</dd>
+  <dt>Level</dt><dd>{{ course.level }}</dd>
+  <dt>Status</dt><dd>{% if course.is_active %}Active{% else %}Inactive{% endif %}</dd>
+  {% if can_manage %}<dt>Enrolled students</dt><dd>{{ enrolled_count }}</dd>{% endif %}
+</dl>
+{% endblock %}

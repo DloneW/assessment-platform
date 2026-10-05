@@ -4,6 +4,8 @@ from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import Lower
 
+from authorization.roles import LECTURER
+
 
 class User(AbstractUser):
     """
@@ -64,6 +66,17 @@ class Course(models.Model):
     title = models.CharField(max_length=200)
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="courses")
     level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="courses")
+    # Resource state: students cannot reach an inactive course.
+    is_active = models.BooleanField(default=True)
+    # Ownership/management: the lecturers who teach this course. Assignment is made by
+    # administrators; the authorization layer also re-checks the LECTURER role, so being
+    # listed here is never enough on its own.
+    lecturers = models.ManyToManyField(
+        settings.AUTH_USER_MODEL,
+        blank=True,
+        related_name="taught_courses",
+        limit_choices_to={"groups__name": LECTURER},
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -86,8 +99,10 @@ class StudentProfile(models.Model):
     student_id = models.CharField(max_length=30)
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="students")
     level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="students")
-    # Courses the student is enrolled in (membership only; no authorization logic yet).
-    courses = models.ManyToManyField(Course, blank=True, related_name="students")
+    # Courses the student is enrolled in, via the explicit Enrollment model below.
+    courses = models.ManyToManyField(
+        Course, through="Enrollment", blank=True, related_name="students"
+    )
 
     class Meta:
         constraints = [
@@ -100,3 +115,25 @@ class StudentProfile(models.Model):
 
     def __str__(self):
         return f"{self.student_id} ({self.user.username})"
+
+
+class Enrollment(models.Model):
+    """A student's enrollment in a course.
+
+    Kept deliberately small. Later it can grow fields such as status, academic
+    session, or semester without changing how the rest of the code uses it.
+    """
+
+    student = models.ForeignKey(StudentProfile, on_delete=models.CASCADE, related_name="enrollments")
+    # PROTECT: a course with enrollment records cannot be deleted by accident.
+    course = models.ForeignKey(Course, on_delete=models.PROTECT, related_name="enrollments")
+    enrolled_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["course__code"]
+        constraints = [
+            models.UniqueConstraint(fields=["student", "course"], name="accounts_enrollment_student_course_unique"),
+        ]
+
+    def __str__(self):
+        return f"{self.student.student_id} in {self.course.code}"

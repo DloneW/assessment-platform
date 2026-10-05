@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Lecturer dashboard{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user.first_name }}</h1>
+<h2>Courses I manage</h2>
+{% if courses %}
+<ul>
+  {% for course in courses %}
+  <li>
+    <a href="{% url 'accounts:course_detail' course.pk %}">{{ course.code }}</a> &ndash; {{ course.title }}
+    ({{ course.department.code }}, {{ course.level }}){% if not course.is_active %} <em>inactive</em>{% endif %}
+  </li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>You are not assigned to any courses yet.</p>
+{% endif %}
+{% endblock %}

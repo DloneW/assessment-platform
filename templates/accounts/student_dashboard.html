@@ -10,6 +10,17 @@
   <dt>Level</dt><dd>{{ profile.level }}</dd>
   <dt>Email</dt><dd>{{ user.email }}</dd>
 </dl>
+<p><a href="{% url 'accounts:student_profile' profile.pk %}">View my profile</a></p>
+<h2>My courses</h2>
+{% if courses %}
+<ul>
+  {% for course in courses %}
+  <li><a href="{% url 'accounts:course_detail' course.pk %}">{{ course.code }}</a> &ndash; {{ course.title }}</li>
+  {% endfor %}
+</ul>
+{% else %}
+<p>You have no accessible courses yet.</p>
+{% endif %}
 {% else %}
 <p>No student profile is linked to this account.</p>
 {% endif %}

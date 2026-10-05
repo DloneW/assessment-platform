@@ -4,6 +4,8 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 
+from authorization.roles import STUDENT, assign_role
+
 from .models import Department, Level, StudentProfile
 
 User = get_user_model()
@@ -74,6 +76,7 @@ class StudentRegistrationForm(forms.ModelForm):
         user.is_staff = False
         user.is_superuser = False
         user.save()
+        assign_role(user, STUDENT)  # fixed server-side; never read from the request
         StudentProfile.objects.create(
             user=user,
             student_id=self.cleaned_data["student_id"],

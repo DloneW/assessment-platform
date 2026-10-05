@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Admin dashboard{% endblock %}
+{% block content %}
+<h1>Administration</h1>
+<dl>
+  <dt>Students</dt><dd>{{ counts.students }}</dd>
+  <dt>Lecturers</dt><dd>{{ counts.lecturers }}</dd>
+  <dt>Administrators</dt><dd>{{ counts.admins }}</dd>
+  <dt>Courses</dt><dd>{{ counts.courses }}</dd>
+</dl>
+{% endblock %}

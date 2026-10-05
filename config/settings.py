@@ -117,7 +117,7 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LOGIN_URL = "accounts:login"
-LOGIN_REDIRECT_URL = "accounts:student_dashboard"
+LOGIN_REDIRECT_URL = "accounts:dashboard"  # role-aware router; the login view also redirects by role
 LOGOUT_REDIRECT_URL = "accounts:login"
 
 
