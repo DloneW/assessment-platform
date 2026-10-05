@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Student dashboard{% endblock %}
+{% block content %}
+<h1>Welcome, {{ user.first_name }}</h1>
+{% if profile %}
+<dl>
+  <dt>Name</dt><dd>{{ user.get_full_name }}</dd>
+  <dt>Student ID</dt><dd>{{ profile.student_id }}</dd>
+  <dt>Department</dt><dd>{{ profile.department.name }}</dd>
+  <dt>Level</dt><dd>{{ profile.level }}</dd>
+  <dt>Email</dt><dd>{{ user.email }}</dd>
+</dl>
+{% else %}
+<p>No student profile is linked to this account.</p>
+{% endif %}
+{% endblock %}

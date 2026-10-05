@@ -1,0 +1,86 @@
+from django.conf import settings
+from django.contrib.auth.models import AbstractUser, UserManager
+from django.core.validators import MinValueValidator
+from django.db import models
+from django.db.models.functions import Lower
+
+
+class User(AbstractUser):
+    """
+    Custom user model (set from day one so it never needs swapping later).
+
+    Extends AbstractUser: username, email, first_name, last_name, password
+    (hashed by Django), is_active, is_staff, is_superuser, date_joined.
+
+    Email is made unique and case-insensitively unique via a constraint.
+    Roles (lecturer/admin) are deliberately NOT modelled yet; that is Day 2.
+    """
+
+    email = models.EmailField("email address", unique=True)
+
+    objects = UserManager()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(Lower("email"), name="accounts_user_email_ci_unique"),
+        ]
+
+    def __str__(self):
+        return self.username
+
+
+class Department(models.Model):
+    name = models.CharField(max_length=150, unique=True)
+    code = models.CharField(max_length=20, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return f"{self.code} - {self.name}"
+
+
+class Level(models.Model):
+    """Academic level, e.g. 100, 200, 300, 400."""
+
+    number = models.PositiveSmallIntegerField(unique=True, validators=[MinValueValidator(1)])
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["number"]
+
+    def __str__(self):
+        return f"{self.number} Level"
+
+
+class Course(models.Model):
+    code = models.CharField(max_length=20, unique=True)
+    title = models.CharField(max_length=200)
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="courses")
+    level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="courses")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["code"]
+
+    def __str__(self):
+        return f"{self.code} - {self.title}"
+
+
+class StudentProfile(models.Model):
+    """
+    Academic identity of a student. Department and level are foreign keys
+    (not copied strings) so Day 2's attribute-based rules can compare
+    profile.department / profile.level against course/test attributes.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile"
+    )
+    student_id = models.CharField(max_length=30, unique=True)
+    department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="students")
+    level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="students")
+
+    def __str__(self):
+        return f"{self.student_id} ({self.user.username})"
