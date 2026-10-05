@@ -12,17 +12,22 @@ class User(AbstractUser):
     Extends AbstractUser: username, email, first_name, last_name, password
     (hashed by Django), is_active, is_staff, is_superuser, date_joined.
 
-    Email is made unique and case-insensitively unique via a constraint.
+    Email uniqueness is case-insensitive and enforced by the database via the
+    Lower("email") constraint below (which also implies exact-match uniqueness).
     Roles (lecturer/admin) are deliberately NOT modelled yet; that is Day 2.
     """
 
-    email = models.EmailField("email address", unique=True)
+    email = models.EmailField("email address")
 
     objects = UserManager()
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(Lower("email"), name="accounts_user_email_ci_unique"),
+            models.UniqueConstraint(
+                Lower("email"),
+                name="accounts_user_email_ci_unique",
+                violation_error_message="A user with this email already exists.",
+            ),
         ]
 
     def __str__(self):
@@ -78,9 +83,20 @@ class StudentProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile"
     )
-    student_id = models.CharField(max_length=30, unique=True)
+    student_id = models.CharField(max_length=30)
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="students")
     level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="students")
+    # Courses the student is enrolled in (membership only; no authorization logic yet).
+    courses = models.ManyToManyField(Course, blank=True, related_name="students")
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                Lower("student_id"),
+                name="accounts_studentprofile_student_id_ci_unique",
+                violation_error_message="A student with this ID already exists.",
+            ),
+        ]
 
     def __str__(self):
         return f"{self.student_id} ({self.user.username})"

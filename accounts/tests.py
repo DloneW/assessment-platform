@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.urls import reverse
@@ -86,6 +87,23 @@ class RegistrationTests(BaseTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("student_id", response.context["form"].errors)
         self.assertEqual(StudentProfile.objects.count(), 1)
+
+    def test_duplicate_student_id_different_case_fails(self):
+        self.make_student()
+        response = self.client.post(
+            self.url,
+            self.registration_data(username="someoneelse", email="other@example.com", student_id="cyb/2024/001"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("student_id", response.context["form"].errors)
+        self.assertEqual(StudentProfile.objects.count(), 1)
+
+    def test_registration_does_not_enroll_in_courses(self):
+        course = Course.objects.create(code="CYB201", title="Intro", department=self.dept, level=self.level)
+        # A "courses" value in the POST must be ignored: enrollment never comes from the form.
+        self.client.post(self.url, self.registration_data(courses=[course.pk]))
+        profile = StudentProfile.objects.get(student_id="CYB/2024/001")
+        self.assertEqual(profile.courses.count(), 0)
 
     def test_05_password_mismatch_fails(self):
         response = self.client.post(self.url, self.registration_data(password2="Different-Pass-99"))
@@ -208,3 +226,63 @@ class ModelTests(BaseTestCase):
                 user=User.objects.get(username="adaobi"), student_id="NEW/1",
                 department=self.dept, level=self.level,
             )  # one profile per user
+
+    def test_student_id_unique_case_insensitively_at_db_level(self):
+        self.make_student()  # student_id "CYB/2024/001"
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            StudentProfile.objects.create(
+                user=User.objects.create_user("z", "z@example.com", STRONG_PASSWORD),
+                student_id="cyb/2024/001", department=self.dept, level=self.level,
+            )
+
+    def test_case_insensitive_constraints_give_readable_validation_errors(self):
+        self.make_student()
+        other = User.objects.create_user("z", "z@example.com", STRONG_PASSWORD)
+
+        profile = StudentProfile(user=other, student_id="Cyb/2024/001", department=self.dept, level=self.level)
+        with self.assertRaises(ValidationError) as cm:
+            profile.full_clean()
+        self.assertIn("A student with this ID already exists.", cm.exception.messages)
+
+        with self.assertRaises(ValidationError) as cm:
+            User(username="y", email="ADA@Example.com", password="x").full_clean()
+        self.assertIn("A user with this email already exists.", cm.exception.messages)
+
+
+class CourseEnrollmentTests(BaseTestCase):
+    def setUp(self):
+        self.c1 = Course.objects.create(code="CYB201", title="Intro", department=self.dept, level=self.level)
+        self.c2 = Course.objects.create(code="CYB202", title="Networks", department=self.dept, level=self.level)
+
+    def test_new_profile_has_no_courses(self):
+        profile = self.make_student().student_profile
+        self.assertEqual(profile.courses.count(), 0)
+
+    def test_student_can_have_multiple_courses(self):
+        profile = self.make_student().student_profile
+        profile.courses.add(self.c1, self.c2)
+        self.assertCountEqual(profile.courses.all(), [self.c1, self.c2])
+
+    def test_course_has_multiple_students_via_reverse_relation(self):
+        p1 = self.make_student().student_profile
+        p2 = self.make_student(username="bola", email="bola@example.com", student_id="CYB/2024/002").student_profile
+        p1.courses.add(self.c1)
+        p2.courses.add(self.c1)
+        self.assertCountEqual(self.c1.students.all(), [p1, p2])
+        self.assertEqual(self.c2.students.count(), 0)
+
+    def test_same_course_cannot_be_enrolled_twice(self):
+        profile = self.make_student().student_profile
+        profile.courses.add(self.c1)
+        profile.courses.add(self.c1)  # idempotent through the ORM API
+        through = StudentProfile.courses.through
+        self.assertEqual(through.objects.count(), 1)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            through.objects.create(studentprofile=profile, course=self.c1)  # DB-level guard
+
+    def test_deleting_student_removes_enrollments_but_keeps_course(self):
+        user = self.make_student()
+        user.student_profile.courses.add(self.c1, self.c2)
+        user.delete()
+        self.assertEqual(StudentProfile.courses.through.objects.count(), 0)
+        self.assertEqual(Course.objects.count(), 2)

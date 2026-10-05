@@ -67,7 +67,8 @@ class StudentRegistrationForm(forms.ModelForm):
         return cleaned
 
     @transaction.atomic
-    def save(self, commit=True):
+    def save(self):
+        """Create the User and its StudentProfile together; always commits (no commit=False)."""
         user = super().save(commit=False)
         user.set_password(self.cleaned_data["password1"])  # Django hashing; never plaintext
         user.is_staff = False
