@@ -12,6 +12,10 @@ from authorization.roles import ADMIN, LECTURER, STUDENT, primary_role, users_wi
 from .forms import StudentRegistrationForm
 from .models import Course, StudentProfile
 
+# Assessments are imported lazily-free here: accounts depends on assessments only for dashboard listings.
+from assessments.models import Attempt, Test  # noqa: E402
+from assessments import services as assessment_services
+
 # HTTP method policy: nothing at the read-only URLs below modifies data, so they accept GET/HEAD
 # only (@require_safe), and the method gate is the OUTERMOST decorator. That way a probing verb
 # gets the same 405 for every user and every object ID; it cannot be used to tell an existing
@@ -74,14 +78,40 @@ def student_dashboard(request):
             for course in profile.courses.select_related("department", "level")
             if services.can_access_course(request.user, course)
         ]
-    return render(request, "accounts/student_dashboard.html", {"profile": profile, "courses": courses})
+    tests, attempts = [], []
+    if profile is not None:
+        assessment_services.expire_overdue_for_student(profile)  # lazy expiry
+        attempts = list(Attempt.objects.filter(student=profile).select_related("test", "test__course"))
+        by_test = {a.test_id: a for a in attempts}
+        eligible = (
+            Test.objects.filter(
+                status=Test.Status.PUBLISHED, course__in=services.courses_accessible_to_student(request.user)
+            )
+            .select_related("course")
+            .order_by("-published_at")
+        )
+        for test in eligible:
+            attempt = by_test.get(test.pk)
+            if attempt is not None:
+                state = "in_progress" if attempt.is_in_progress else "done"
+            elif test.is_open():
+                state = "open"
+            else:
+                state = "closed"
+            tests.append({"test": test, "attempt": attempt, "state": state})
+    return render(
+        request,
+        "accounts/student_dashboard.html",
+        {"profile": profile, "courses": courses, "tests": tests, "attempts": attempts},
+    )
 
 
 @require_safe
 @require(services.can_access_lecturer_dashboard)
 def lecturer_dashboard(request):
     courses = request.user.taught_courses.select_related("department", "level")
-    return render(request, "accounts/lecturer_dashboard.html", {"courses": courses})
+    tests = Test.objects.filter(course__in=services.courses_managed_by(request.user)).select_related("course")
+    return render(request, "accounts/lecturer_dashboard.html", {"courses": courses, "tests": tests})
 
 
 @require_safe
@@ -125,4 +155,6 @@ def course_detail(request, pk):
     }
     if context["can_manage"]:
         context["enrolled_count"] = course.enrollments.count()
+        context["tests"] = course.tests.all()
+        context["can_create_test"] = services.can_create_test(request.user, course)
     return render(request, "accounts/course_detail.html", context)

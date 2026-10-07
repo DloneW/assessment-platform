@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{% if test %}Edit test{% else %}New test{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if test %}Edit test{% else %}New test{% endif %}</h1>
+<p class="muted">Course: {{ course.code }} &ndash; {{ course.title }}</p>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">{% if test %}Save changes{% else %}Create draft{% endif %}</button>
+</form>
+<p><a href="{% if test %}{% url 'assessments:test_manage' test.pk %}{% else %}{% url 'accounts:course_detail' course.pk %}{% endif %}">Cancel</a></p>
+{% endblock %}

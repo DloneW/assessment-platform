@@ -2,7 +2,7 @@
 
 A server-rendered Django web application for online student assessments. Students, lecturers and administrators will eventually take and manage timed tests with server-side scoring.
 
-**Status: Day 2 complete and hardened.**
+**Status: Day 3 complete (assessment engine).**
 
 Implemented:
 - Authentication (Django sessions; register, login, logout)
@@ -14,8 +14,9 @@ Implemented:
 - Object-level authorization (student profiles, courses)
 - Protected dashboards for students, lecturers and administrators
 - Authorization and security regression tests
+- Assessment engine: tests, questions, choices, timed attempts, server-side scoring and results
 
-**Not implemented yet** (later days): the assessment/test engine, questions, attempts, timers, submissions, scoring and results.
+**Not implemented yet** (later days): deployment hardening, lecturer result views, retakes, analytics.
 
 ## Tech stack
 
@@ -72,6 +73,10 @@ python manage.py test authorization    # authorization and security boundary tes
 | `/admin/dashboard/`    | Application ADMIN (not the Django admin site)     |
 | `/students/<id>/`      | The student themself, or an application ADMIN     |
 | `/courses/<id>/`       | See "Course access" below                         |
+| `/courses/<id>/tests/new/` | Lecturer assigned to the course (or ADMIN)    |
+| `/tests/<id>/manage/`, `edit/`, `questions/...`, `publish/`, `archive/` | Lecturer assigned to the test's course (or ADMIN) |
+| `/tests/<id>/`, `/tests/<id>/start/` | Eligible, enrolled STUDENT of a published, open test |
+| `/tests/<id>/attempts/<id>/` (+ `save/`, `submit/`) | The student who owns the attempt |
 | `/admin/`              | Django admin site (`is_staff` users)              |
 
 ## Authorization
@@ -118,6 +123,42 @@ Roles can also be changed in the Django admin (Users -> Groups), but only by sup
 - **No login throttling.** Repeated password guesses are not rate-limited.
 - **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not set (`python manage.py check --deploy` lists them). Set them when deploying; they would break plain-HTTP local runs if forced on now.
 
+## Assessment engine (Day 3)
+
+**Lifecycle.**
+
+```
+Lecturer:  Course -> Create test (DRAFT) -> add questions + choices -> validate -> Publish (frozen) -> Archive
+Student:   eligible published test -> Start attempt -> Answer (save) -> Submit -> server-side score -> Result
+```
+
+**Core models** (`assessments/models.py`): `Test` (DRAFT/PUBLISHED/ARCHIVED, course, creator, duration, optional start window, `published_at`), `Question` (order, marks), `Choice` (order, `is_correct`), `Attempt` (student, test, status IN_PROGRESS/SUBMITTED/EXPIRED, `started_at`, stored `deadline`, `submitted_at`, `score`, `max_score`), `StudentAnswer` (one per attempt and question). There is no separate Result model: the finalized `Attempt` is the result.
+
+**Authorization integration.** The Day 2 layers are extended, not duplicated. `rules.py` gains small rules (draft/published/open, attempt ownership and state); `services.py` gains `can_create_test`, `can_manage_test`, `can_edit_test`, `can_publish_test`, `can_archive_test`, `can_take_test`, `can_access_test`, `can_start_attempt`, `can_view_attempt`, `can_answer_attempt`, `can_submit_attempt`, plus `courses_managed_by` / `courses_accessible_to_student` for listings (a test asserts they agree with the per-object decisions). Lecturers manage tests only in courses they are assigned to; the course comes from the URL object and is checked by `can_create_test`, never taken from the form. Students reach a test only through the Day 2 course rules (active course, matching department and level, enrolled) AND only while it is published. Denied objects return 404, identical to missing ones.
+
+**Publishing rules.** A test is publishable only with a valid duration, at least one question, every question having at least two choices and exactly one correct choice, and a window that has not already closed. Publishing is a compare-and-set from DRAFT, and a published test is frozen so scoring cannot shift under existing attempts.
+
+**Server-side scoring.** The score is computed in `assessments/services.py` from stored answers and the answer key when the attempt is finalized, then stored. Nothing about score, status, correctness, student, test or timestamps is read from a request. Student-facing queries defer `Choice.is_correct`, so the answer key is never loaded into student pages, and the result page shows only the score.
+
+**Server-side timing.** `deadline = started_at + duration` is stored when the attempt starts (later duration edits cannot move it). Every save and submit compares the server clock with it. A submit at or after the deadline finalizes the attempt as EXPIRED, scored on answers saved before the deadline; late answers are discarded. The page countdown is display only; it autosaves on change and auto-submits at zero, and the server decides regardless.
+
+**Major security decisions.**
+- One attempt per student per test, enforced by a unique constraint (never two active attempts; no retakes in this version). `get_or_create` turns a lost race into a plain "get".
+- Finalization is a compare-and-set (`UPDATE ... WHERE status = 'IN_PROGRESS'`), so a double submit changes nothing.
+- Answer chain: attempt owner -> attempt belongs to the test in the URL -> in progress and before deadline -> question belongs to that test -> choice belongs to that question. A bad pair rejects the whole request (400) and writes nothing.
+- Database constraints cover duration bounds, window order, publication state, one correct choice per question, unique ordering, attempt state/score consistency and one answer per question per attempt. Two cross-table rules (question in the attempt's test, choice in the question) are enforced in `StudentAnswer.save()` and the service.
+- State-changing routes are POST-only and CSRF-protected; templates autoescape and never use `|safe`.
+
+### Known limitations
+
+- **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
+- **No login throttling.** Repeated password guesses are not rate-limited.
+- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not set (`python manage.py check --deploy` lists them). Set them when deploying.
+- **Lazy expiry.** No background job: an overdue attempt becomes EXPIRED the next time it or its student's dashboard is opened. Nothing can be written to it meanwhile.
+- **One attempt, no retakes**; lecturers cannot yet view students' attempts or results (only the owner can; admins can audit read-only in the Django admin).
+- `bulk_create` and queryset `.update()` bypass `StudentAnswer.save()` checks; application writes go through the services.
+- SQLite serializes writers; on another database the draft/publish race relies on `select_for_update` row locks.
+
 ### Not implemented yet (later days)
 
-Assessment/test engine (`Test`), `Question`, `Attempt`, timers, submissions, scoring and results. Day 3 adds `can_access_test`, `can_edit_test`, `can_publish_test` and `can_view_attempt` to `services.py` by composing the existing rules with publication state and availability windows.
+Security hardening and deployment configuration, lecturer result views and analytics, retakes. Proctoring, AI question generation, leaderboards, certificates, APIs, Redis, Celery and WebSockets are out of scope.

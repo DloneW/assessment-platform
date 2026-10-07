@@ -8,4 +8,13 @@
   <dt>Status</dt><dd>{% if course.is_active %}Active{% else %}Inactive{% endif %}</dd>
   {% if can_manage %}<dt>Enrolled students</dt><dd>{{ enrolled_count }}</dd>{% endif %}
 </dl>
+{% if can_manage %}
+<h2>Tests</h2>
+{% for test in tests %}
+<div class="card"><a href="{% url 'assessments:test_manage' test.pk %}">{{ test.title }}</a> <span class="tag">{{ test.get_status_display }}</span></div>
+{% empty %}
+<p>No tests yet.</p>
+{% endfor %}
+{% if can_create_test %}<p><a href="{% url 'assessments:test_create' course.pk %}">Create a test</a></p>{% endif %}
+{% endif %}
 {% endblock %}

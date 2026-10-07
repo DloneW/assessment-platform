@@ -21,6 +21,18 @@
 {% else %}
 <p>You have no accessible courses yet.</p>
 {% endif %}
+<h2>Tests</h2>
+{% for item in tests %}
+<div class="card">
+  <strong>{{ item.test.title }}</strong> <span class="muted">{{ item.test.course.code }} &middot; {{ item.test.duration_minutes }} min</span><br>
+  {% if item.state == "in_progress" %}<a href="{% url 'assessments:attempt_detail' item.test.pk item.attempt.pk %}">Resume</a>
+  {% elif item.state == "done" %}<a href="{% url 'assessments:attempt_detail' item.test.pk item.attempt.pk %}">View result</a>
+  {% elif item.state == "open" %}<a href="{% url 'assessments:test_intro' item.test.pk %}">View and start</a>
+  {% else %}<span class="muted">Not open right now</span>{% endif %}
+</div>
+{% empty %}
+<p>No tests are available to you right now.</p>
+{% endfor %}
 {% else %}
 <p>No student profile is linked to this account.</p>
 {% endif %}

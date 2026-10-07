@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}{{ test.title }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>{{ test.title }} <span class="tag">{{ test.get_status_display }}</span></h1>
+<p class="muted">
+  {{ test.course.code }} &middot; {{ test.duration_minutes }} minutes
+  {% if test.opens_at %}&middot; opens {{ test.opens_at }}{% endif %}
+  {% if test.closes_at %}&middot; closes {{ test.closes_at }}{% endif %}
+  {% if test.published_at %}&middot; published {{ test.published_at }}{% endif %}
+</p>
+{% if test.description %}<p>{{ test.description|linebreaksbr }}</p>{% endif %}
+
+<div>
+  {% if can_edit %}<a href="{% url 'assessments:test_edit' test.pk %}">Edit details</a> &middot;
+  <a href="{% url 'assessments:question_add' test.pk %}">Add question</a>{% endif %}
+  {% if can_publish %}
+  <form class="inline" method="post" action="{% url 'assessments:test_publish' test.pk %}">{% csrf_token %}<button type="submit">Publish</button></form>
+  {% endif %}
+  {% if can_archive %}
+  <form class="inline" method="post" action="{% url 'assessments:test_archive' test.pk %}">{% csrf_token %}<button type="submit" class="danger">Archive</button></form>
+  {% endif %}
+</div>
+
+{% if problems %}
+<div class="card">
+  <strong>Before this test can be published:</strong>
+  <ul>{% for problem in problems %}<li>{{ problem }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<h2>Questions ({{ questions|length }})</h2>
+{% for question in questions %}
+<div class="card">
+  <strong>{{ forloop.counter }}.</strong> {{ question.text|linebreaksbr }} <span class="tag">{{ question.marks }} mark{{ question.marks|pluralize }}</span>
+  <ol type="A">
+    {% for choice in question.choices.all %}
+    <li>{{ choice.text }}{% if choice.is_correct %} <strong>&#10003; correct</strong>{% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% if can_edit %}
+  <a href="{% url 'assessments:question_edit' test.pk question.pk %}">Edit</a>
+  <form class="inline" method="post" action="{% url 'assessments:question_delete' test.pk question.pk %}">{% csrf_token %}<button type="submit" class="danger">Delete</button></form>
+  {% endif %}
+</div>
+{% empty %}
+<p>No questions yet.</p>
+{% endfor %}
+<p><a href="{% url 'accounts:course_detail' test.course.pk %}">Back to course</a></p>
+{% endblock %}

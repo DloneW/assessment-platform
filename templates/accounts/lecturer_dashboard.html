@@ -15,4 +15,10 @@
 {% else %}
 <p>You are not assigned to any courses yet.</p>
 {% endif %}
+<h2>Tests</h2>
+{% for test in tests %}
+<div class="card"><a href="{% url 'assessments:test_manage' test.pk %}">{{ test.title }}</a> <span class="tag">{{ test.get_status_display }}</span> <span class="muted">{{ test.course.code }}</span></div>
+{% empty %}
+<p>No tests yet. Open a course to create one.</p>
+{% endfor %}
 {% endblock %}

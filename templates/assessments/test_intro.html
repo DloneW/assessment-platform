@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ test.title }}{% endblock %}
+{% block content %}
+<h1>{{ test.title }}</h1>
+<dl>
+  <dt>Course</dt><dd>{{ test.course.code }} &ndash; {{ test.course.title }}</dd>
+  <dt>Duration</dt><dd>{{ test.duration_minutes }} minutes</dd>
+  <dt>Questions</dt><dd>{{ question_count }}</dd>
+  {% if test.opens_at %}<dt>Opens</dt><dd>{{ test.opens_at }}</dd>{% endif %}
+  {% if test.closes_at %}<dt>Closes</dt><dd>{{ test.closes_at }}</dd>{% endif %}
+</dl>
+{% if test.description %}<p>{{ test.description|linebreaksbr }}</p>{% endif %}
+<p class="muted">You get one attempt. The clock starts when you press Start and is enforced by the server.</p>
+{% if attempt %}
+  <p><a href="{% url 'assessments:attempt_detail' test.pk attempt.pk %}">{% if attempt.is_in_progress %}Resume your attempt{% else %}View your result{% endif %}</a></p>
+{% elif can_start %}
+  <form method="post" action="{% url 'assessments:attempt_start' test.pk %}">{% csrf_token %}<button type="submit">Start test</button></form>
+{% else %}
+  <p>This test is not open right now.</p>
+{% endif %}
+<p><a href="{% url 'accounts:student_dashboard' %}">Back to dashboard</a></p>
+{% endblock %}

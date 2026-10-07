@@ -47,3 +47,32 @@ def is_assigned_lecturer(user, course):
 
 def owns_student_profile(user, profile):
     return profile.user_id == user.pk
+
+
+# --- Assessment rules (Day 3) ---------------------------------------------------
+
+def assessment_is_draft(test):
+    return test.is_draft
+
+
+def assessment_is_published(test):
+    return test.is_published
+
+
+def assessment_is_open(test, now=None):
+    """Published and inside the optional start window."""
+    return test.is_open(now)
+
+
+def owns_attempt(user, attempt):
+    """The attempt belongs to the student profile of this user (compared by id, server-side)."""
+    profile = student_profile_of(user)
+    return profile is not None and attempt.student_id == profile.pk
+
+
+def attempt_is_in_progress(attempt):
+    return attempt.is_in_progress
+
+
+def attempt_before_deadline(attempt, now=None):
+    return not attempt.is_past_deadline(now)

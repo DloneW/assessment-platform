@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% load assessment_extras %}
+{% block title %}{{ attempt.test.title }}{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>{{ attempt.test.title }}</h1>
+<p><strong>Time left: <span id="timer" data-remaining="{{ remaining_seconds }}">--:--</span></strong>
+  <span class="muted">(display only; the server enforces the deadline)</span></p>
+<form id="attempt-form" method="post" action="{% url 'assessments:attempt_submit' attempt.test_id attempt.pk %}">
+  {% csrf_token %}
+  {% for question in questions %}
+  <div class="card">
+    <strong>{{ forloop.counter }}.</strong> {{ question.text|linebreaksbr }} <span class="tag">{{ question.marks }} mark{{ question.marks|pluralize }}</span>
+    <div class="radios">
+      {% for choice in question.choices.all %}
+      <label><input type="radio" name="q_{{ question.pk }}" value="{{ choice.pk }}"{% if selected|get_item:question.pk == choice.pk %} checked{% endif %}> {{ choice.text }}</label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  <button type="submit" id="submit-btn">Submit test</button>
+  <button type="submit" formaction="{% url 'assessments:attempt_save' attempt.test_id attempt.pk %}">Save progress</button>
+</form>
+<script>
+(function () {
+  var form = document.getElementById("attempt-form");
+  var timer = document.getElementById("timer");
+  var left = parseInt(timer.dataset.remaining, 10);
+  var started = performance.now();
+  var saveUrl = "{% url 'assessments:attempt_save' attempt.test_id attempt.pk %}";
+  function fmt(s) { var m = Math.floor(s / 60), r = s % 60; return (m < 10 ? "0" : "") + m + ":" + (r < 10 ? "0" : "") + r; }
+  function tick() {
+    var s = Math.max(0, left - Math.floor((performance.now() - started) / 1000));
+    timer.textContent = fmt(s);
+    if (s <= 0) { form.submit(); return; }
+    setTimeout(tick, 500);
+  }
+  tick();
+  // Best-effort autosave on every change so answers reach the server before the deadline.
+  form.addEventListener("change", function () {
+    var data = new FormData(form);
+    data.append("ajax", "1");
+    fetch(saveUrl, { method: "POST", body: data, credentials: "same-origin" });
+  });
+})();
+</script>
+{% endblock %}

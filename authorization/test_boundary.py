@@ -46,6 +46,22 @@ ROUTE_POLICY = {
     "student_profile": "owner or ADMIN, else 404; GET/HEAD only",
     "course_detail": "can_access_course, else 404; GET/HEAD only",
 }
+# Every URL name in the "assessments" namespace: (allowed method, who, what a denied object gets).
+ASSESSMENT_ROUTE_POLICY = {
+    "test_create": ("GET/POST", "can_create_test on the course in the URL, else 404"),
+    "test_manage": ("GET", "can_manage_test, else 404"),
+    "test_edit": ("GET/POST", "can_manage_test, else 404; draft only"),
+    "question_add": ("GET/POST", "can_manage_test, else 404; draft only"),
+    "question_edit": ("GET/POST", "can_manage_test + question belongs to test, else 404; draft only"),
+    "question_delete": ("POST", "can_manage_test + question belongs to test, else 404; draft only"),
+    "test_publish": ("POST", "can_manage_test, else 404; validated"),
+    "test_archive": ("POST", "can_manage_test, else 404"),
+    "test_intro": ("GET", "can_take_test, else 404"),
+    "attempt_start": ("POST", "can_take_test, else 404; can_start_attempt"),
+    "attempt_detail": ("GET", "can_view_attempt (owner) + attempt belongs to test in URL, else 404"),
+    "attempt_save": ("POST", "can_view_attempt, can_answer_attempt"),
+    "attempt_submit": ("POST", "can_view_attempt, can_submit_attempt"),
+}
 READ_ONLY_ROUTES = [name for name, policy in ROUTE_POLICY.items() if "GET/HEAD only" in policy]
 
 
@@ -99,10 +115,32 @@ class RouteInventoryTests(BoundaryTestCase):
     def test_every_route_has_a_deliberate_policy(self):
         routes = list(walk(get_resolver().url_patterns))
         namespaces = {ns for ns, _, _ in routes}
-        self.assertEqual(namespaces, {"accounts", "admin", None})  # nothing else is mounted
+        self.assertEqual(namespaces, {"accounts", "admin", "assessments", None})  # nothing else is mounted
         self.assertEqual({(n, p) for ns, n, p in routes if ns is None}, {(None, "")})  # root redirect only
         accounts_names = {name for ns, name, _ in routes if ns == "accounts"}
         self.assertEqual(accounts_names, set(ROUTE_POLICY))
+        assessment_names = {name for ns, name, _ in routes if ns == "assessments"}
+        self.assertEqual(assessment_names, set(ASSESSMENT_ROUTE_POLICY))
+
+    def test_assessment_routes_are_login_gated_and_method_gated(self):
+        from django.urls import NoReverseMatch  # noqa: F401  (documenting the failure mode)
+
+        args = {
+            "test_create": [self.cyb201.pk], "test_manage": [1], "test_edit": [1], "question_add": [1],
+            "question_edit": [1, 1], "question_delete": [1, 1], "test_publish": [1], "test_archive": [1],
+            "test_intro": [1], "attempt_start": [1], "attempt_detail": [1, 1], "attempt_save": [1, 1], "attempt_submit": [1, 1],
+        }
+        self.client.logout()
+        for name, (methods, _policy) in ASSESSMENT_ROUTE_POLICY.items():
+            url = reverse(f"assessments:{name}", args=args[name])
+            allowed = methods.split("/")
+            with self.subTest(route=name):
+                for method in allowed:
+                    response = getattr(self.client, method.lower())(url)
+                    self.assertEqual(response.status_code, 302)
+                    self.assertTrue(response.url.startswith(reverse("accounts:login") + "?next="))
+                for method in {"GET", "POST", "PUT", "PATCH", "DELETE"} - set(allowed):
+                    self.assertEqual(getattr(self.client, method.lower())(url).status_code, 405, method)
 
     def test_no_route_exposes_enrollments_or_role_management(self):
         # Enrollment objects and group membership are reachable only through Django admin

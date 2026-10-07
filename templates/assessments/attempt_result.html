@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Result{% endblock %}
+{% block content %}
+<h1>{{ attempt.test.title }}</h1>
+<p><span class="tag">{{ attempt.get_status_display }}</span></p>
+<dl>
+  <dt>Score</dt><dd>{{ attempt.score }} / {{ attempt.max_score }}{% if attempt.percentage is not None %} ({{ attempt.percentage }}%){% endif %}</dd>
+  <dt>Started</dt><dd>{{ attempt.started_at }}</dd>
+  {% if attempt.submitted_at %}<dt>Submitted</dt><dd>{{ attempt.submitted_at }}</dd>{% else %}<dt>Closed by the clock at</dt><dd>{{ attempt.deadline }}</dd>{% endif %}
+</dl>
+<p><a href="{% url 'accounts:student_dashboard' %}">Back to dashboard</a></p>
+{% endblock %}

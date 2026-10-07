@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{% if question %}Edit question{% else %}Add question{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if question %}Edit question{% else %}Add question{% endif %}</h1>
+<p class="muted">{{ test.title }}. Fill at least two choices and mark exactly one as correct.</p>
+<form method="post" novalidate>
+  {% csrf_token %}
+  {{ form.as_p }}
+  <button type="submit">Save question</button>
+</form>
+<p><a href="{% url 'assessments:test_manage' test.pk %}">Back to test</a></p>
+{% endblock %}

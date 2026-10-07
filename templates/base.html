@@ -10,7 +10,17 @@
     header a { color: #fff; text-decoration: none; font-weight: 600; }
     main { max-width: 520px; margin: 2rem auto; background: #fff; padding: 1.5rem 2rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
     label { display: block; margin-top: .9rem; font-weight: 600; }
-    input, select { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
+    main.wide { max-width: 820px; }
+    input, select, textarea { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
+    input[type=radio] { width: auto; margin-right: .5rem; }
+    textarea { padding: .5rem; margin-top: .25rem; box-sizing: border-box; font: inherit; }
+    .muted { color: #52606d; font-size: .9rem; }
+    .card { border: 1px solid #d9dee4; border-radius: 6px; padding: .8rem 1rem; margin: .8rem 0; }
+    .tag { display: inline-block; background: #e4e7eb; border-radius: 3px; padding: 0 .4rem; font-size: .8rem; }
+    .danger { background: #b42318; }
+    .messages li.error { background: #fde8e8; }
+    .radios label { font-weight: 400; margin-top: .3rem; }
+    .radios ul { list-style: none; padding: 0; margin: 0; }
     button { margin-top: 1.2rem; padding: .6rem 1.2rem; background: #1f3a5f; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
     .errorlist { color: #b42318; list-style: none; padding: 0; margin: .25rem 0 0; font-size: .9rem; }
     .messages { list-style: none; padding: 0; }
@@ -32,9 +42,9 @@
       </form>
     {% endif %}
   </header>
-  <main>
+  <main class="{% block main_class %}{% endblock %}">
     {% if messages %}
-      <ul class="messages">{% for message in messages %}<li>{{ message }}</li>{% endfor %}</ul>
+      <ul class="messages">{% for message in messages %}<li class="{{ message.tags }}">{{ message }}</li>{% endfor %}</ul>
     {% endif %}
     {% block content %}{% endblock %}
   </main>
