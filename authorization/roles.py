@@ -12,6 +12,7 @@ Roles are checked by explicit group membership (not `user.has_perm()`, which
 returns True for every permission when the user is a superuser).
 """
 
+from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
 
@@ -25,6 +26,14 @@ ALL_ROLES = (STUDENT, LECTURER, ADMIN)
 LANDING_PRECEDENCE = (ADMIN, LECTURER, STUDENT)
 
 
+def holds_role(user, role):
+    """True if `user` is a member of the role's group, whether or not the account is active.
+
+    Use this to PROTECT accounts (e.g. in the Django admin); use `has_role` to AUTHORIZE requests.
+    """
+    return user.groups.filter(name=role).exists()
+
+
 def has_role(user, role):
     """True if `user` is an authenticated, active member of the role's group.
 
@@ -33,7 +42,12 @@ def has_role(user, role):
     """
     if user is None or not user.is_authenticated or not user.is_active:
         return False
-    return user.groups.filter(name=role).exists()
+    return holds_role(user, role)
+
+
+def users_with_role(role):
+    """Queryset of users holding `role`. The one place that maps a role to its group name for queries."""
+    return get_user_model().objects.filter(groups__name=role)
 
 
 def primary_role(user):

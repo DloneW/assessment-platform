@@ -15,10 +15,15 @@ models (course access + ownership + publication state/availability window).
 """
 
 from . import rules
-from .roles import ADMIN, LECTURER, STUDENT, has_role
+from .roles import ADMIN, LECTURER, STUDENT, has_role, primary_role
 
 
 # --- Role-gated pages (no object involved) --------------------------------------
+
+def can_access_dashboard(user):
+    """The /dashboard/ router: any account that holds at least one application role."""
+    return primary_role(user) is not None
+
 
 def can_access_student_dashboard(user):
     return has_role(user, STUDENT)

@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as DjangoUserAdmin
 
+from authorization.roles import ADMIN, holds_role
+
 from .models import Course, Department, Enrollment, Level, StudentProfile, User
 
 
@@ -24,6 +26,28 @@ class UserAdmin(DjangoUserAdmin):
         if not request.user.is_superuser:
             readonly = (*readonly, *self.PRIVILEGE_FIELDS)
         return readonly
+
+    # Read-only privilege fields are not enough on their own: Django lets anyone with the
+    # "change user" permission edit a user, delete a user, or SET THEIR PASSWORD (the password
+    # page is gated by has_change_permission). A delegated staff member could therefore reset
+    # the password of a superuser, an application ADMIN or another staff member and log in as
+    # them. So non-superusers may only manage ordinary accounts (and edit their own).
+    @staticmethod
+    def _is_privileged_account(user):
+        return user.is_superuser or user.is_staff or holds_role(user, ADMIN)
+
+    def _may_manage(self, request, obj, *, allow_self):
+        if obj is None or request.user.is_superuser:
+            return True  # obj is None is the changelist/add screen, not a specific account
+        if allow_self and obj.pk == request.user.pk:
+            return True
+        return not self._is_privileged_account(obj)
+
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and self._may_manage(request, obj, allow_self=True)
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and self._may_manage(request, obj, allow_self=False)
 
 
 @admin.register(Department)

@@ -2,7 +2,20 @@
 
 A server-rendered Django web application for online student assessments. Students, lecturers and administrators will eventually take and manage timed tests with server-side scoring.
 
-**Status: Day 1 foundation.** Custom user model, academic models (Department, Level, Course, StudentProfile), student registration, login/logout and a student dashboard. Roles, attribute-based authorization, tests, questions, attempts and results come in later days.
+**Status: Day 2 complete and hardened.**
+
+Implemented:
+- Authentication (Django sessions; register, login, logout)
+- Application roles: STUDENT, LECTURER, ADMIN (Django Groups, separate from `is_staff` / `is_superuser`)
+- Student registration (always creates a STUDENT; creates the user and student profile atomically)
+- Academic models: Department, Level, Course (with `is_active` and assigned lecturers), StudentProfile
+- Course enrollment (explicit `Enrollment` model, one row per student and course)
+- Attribute-based authorization (role + department + level + enrollment + course state)
+- Object-level authorization (student profiles, courses)
+- Protected dashboards for students, lecturers and administrators
+- Authorization and security regression tests
+
+**Not implemented yet** (later days): the assessment/test engine, questions, attempts, timers, submissions, scoring and results.
 
 ## Tech stack
 
@@ -41,8 +54,10 @@ Then open <http://127.0.0.1:8000/admin/> and add at least one **Department** and
 ## Tests and checks
 
 ```bash
-python manage.py test
 python manage.py check
+python manage.py makemigrations --check --dry-run
+python manage.py test                  # everything
+python manage.py test authorization    # authorization and security boundary tests
 ```
 
 ## URLs
@@ -51,7 +66,7 @@ python manage.py check
 |------------------------|---------------------------------------------------|
 | `/register/`           | Anyone (always creates a STUDENT)                 |
 | `/login/`, `/logout/`  | Anyone / logged-in users (logout is POST)         |
-| `/dashboard/`          | Any logged-in user; redirects to their role's dashboard |
+| `/dashboard/`          | Logged-in user holding a role; redirects to that role's dashboard (403 if the account has no role) |
 | `/student/dashboard/`   | STUDENT                                           |
 | `/lecturer/dashboard/` | LECTURER                                          |
 | `/admin/dashboard/`    | Application ADMIN (not the Django admin site)     |
@@ -80,6 +95,12 @@ authorization/
 
 **Responses.** Anonymous users are redirected to login. A logged-in user opening a role-gated page they may not use (e.g. a student requesting `/lecturer/dashboard/`) gets **403**. A logged-in user requesting an *object* they may not access (another student's profile, a course they have no access to) gets **404**, identical to a nonexistent ID, because sequential IDs would otherwise let anyone enumerate what exists. Error pages never say why access was denied.
 
+**HTTP methods.** Nothing at the dashboard, profile or course URLs modifies data, so they accept GET and HEAD only; any other verb gets 405 before login, role or object checks run. That makes the response identical for every user and every object ID, so a probing verb cannot reveal whether an object exists. `/register/` accepts GET/HEAD/POST, `/login/` GET/HEAD/POST, and `/logout/` POST only. All of them are CSRF-protected.
+
+**Django admin guard.** Only superusers can change `is_staff`, `is_superuser`, groups or permissions. In addition, a non-superuser staff member can edit or delete only ordinary accounts (and edit their own): they cannot edit, delete or reset the password of a superuser, an application ADMIN or another staff member, because Django's "change user" permission would otherwise allow taking over those accounts. Grant staff access and model permissions sparingly.
+
+**Enrollment and lecturers.** There is no self-enrollment. Enrollments and lecturer assignments are managed in the Django admin by staff with the relevant permissions.
+
 ### Creating privileged accounts
 
 Public registration can only ever create students. Privileged roles are assigned by trusted, server-side means only:
@@ -91,6 +112,12 @@ python manage.py assign_role <username> ADMIN      # or LECTURER / STUDENT; repl
 
 Roles can also be changed in the Django admin (Users -> Groups), but only by superusers: for everyone else the staff, superuser, group and permission fields are read-only. Assign lecturers to courses in the admin under Courses -> Lecturers.
 
-### Not yet implemented (later days)
+### Known limitations
 
-`Test`, `Question`, `Attempt`, scoring and results. Day 3 adds `can_access_test`, `can_edit_test`, `can_publish_test` and `can_view_attempt` to `services.py` by composing the rules above with publication state and availability windows.
+- **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
+- **No login throttling.** Repeated password guesses are not rate-limited.
+- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not set (`python manage.py check --deploy` lists them). Set them when deploying; they would break plain-HTTP local runs if forced on now.
+
+### Not implemented yet (later days)
+
+Assessment/test engine (`Test`), `Question`, `Attempt`, timers, submissions, scoring and results. Day 3 adds `can_access_test`, `can_edit_test`, `can_publish_test` and `can_view_attempt` to `services.py` by composing the existing rules with publication state and availability windows.

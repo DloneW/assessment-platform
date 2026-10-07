@@ -1,19 +1,21 @@
 from django.contrib import messages
-from django.contrib.auth import get_user_model
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.views.decorators.http import require_http_methods, require_safe
 
 from authorization import services
 from authorization.enforcement import get_authorized_or_404, require
-from authorization.roles import ADMIN, LECTURER, STUDENT, primary_role
+from authorization.roles import ADMIN, LECTURER, STUDENT, primary_role, users_with_role
 
 from .forms import StudentRegistrationForm
 from .models import Course, StudentProfile
 
-User = get_user_model()
+# HTTP method policy: nothing at the read-only URLs below modifies data, so they accept GET/HEAD
+# only (@require_safe), and the method gate is the OUTERMOST decorator. That way a probing verb
+# gets the same 405 for every user and every object ID; it cannot be used to tell an existing
+# object from a missing one, and it never reaches the authorization checks or the database.
 
 # Where each role lands after login. A user holding several roles lands on the highest.
 LANDING_URL_NAMES = {
@@ -28,11 +30,13 @@ class RoleAwareLoginView(LoginView):
 
     template_name = "accounts/login.html"
     redirect_authenticated_user = True
+    http_method_names = ["get", "head", "post", "options"]  # Django's FormView would also accept PUT
 
     def get_default_redirect_url(self):
         return reverse(LANDING_URL_NAMES.get(primary_role(self.request.user), "accounts:dashboard"))
 
 
+@require_http_methods(["GET", "HEAD", "POST"])
 def register(request):
     if request.user.is_authenticated:
         return redirect("accounts:dashboard")
@@ -48,15 +52,14 @@ def register(request):
     return render(request, "accounts/register.html", {"form": form})
 
 
-@login_required
+@require_safe
+@require(services.can_access_dashboard)
 def dashboard(request):
-    """Send the user to the dashboard for their role; users with no role get 403."""
-    role = primary_role(request.user)
-    if role is None:
-        raise PermissionDenied
-    return redirect(LANDING_URL_NAMES[role])
+    """Send the user to the dashboard for their role (accounts with no role get 403)."""
+    return redirect(LANDING_URL_NAMES[primary_role(request.user)])
 
 
+@require_safe
 @require(services.can_access_student_dashboard)
 def student_dashboard(request):
     # The session determines the student; nothing identifying comes from the URL.
@@ -74,24 +77,27 @@ def student_dashboard(request):
     return render(request, "accounts/student_dashboard.html", {"profile": profile, "courses": courses})
 
 
+@require_safe
 @require(services.can_access_lecturer_dashboard)
 def lecturer_dashboard(request):
     courses = request.user.taught_courses.select_related("department", "level")
     return render(request, "accounts/lecturer_dashboard.html", {"courses": courses})
 
 
+@require_safe
 @require(services.can_access_admin_dashboard)
 def admin_dashboard(request):
     # Aggregate counts only; no personal data on this page yet.
     counts = {
-        "students": User.objects.filter(groups__name=STUDENT).count(),
-        "lecturers": User.objects.filter(groups__name=LECTURER).count(),
-        "admins": User.objects.filter(groups__name=ADMIN).count(),
+        "students": users_with_role(STUDENT).count(),
+        "lecturers": users_with_role(LECTURER).count(),
+        "admins": users_with_role(ADMIN).count(),
         "courses": Course.objects.count(),
     }
     return render(request, "accounts/admin_dashboard.html", {"counts": counts})
 
 
+@require_safe
 @login_required
 def student_profile_detail(request, pk):
     profile = get_authorized_or_404(
@@ -104,6 +110,7 @@ def student_profile_detail(request, pk):
     return render(request, "accounts/student_profile.html", {"profile": profile, "courses": courses})
 
 
+@require_safe
 @login_required
 def course_detail(request, pk):
     course = get_authorized_or_404(
