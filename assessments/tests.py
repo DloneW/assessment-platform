@@ -1000,3 +1000,202 @@ class AttackTests(AssessmentTestCase):
         self.assertTrue(authz.can_access_student_dashboard(self.alice))
         self.assertFalse(self.alice.is_staff)
         self.assertEqual(list(self.alice.groups.values_list("name", flat=True)), [STUDENT])
+
+
+# --------------------------------------------------------------------------------
+# STATE-AWARE START (one attempt per student per test; finalized attempts never reopen)
+# --------------------------------------------------------------------------------
+class StartAttemptStateTests(AssessmentTestCase):
+    def start_url(self):
+        return reverse("assessments:attempt_start", args=[self.test201.pk])
+
+    def finalize(self, attempt, expired=False):
+        """Submit (or let the clock expire) the attempt after answering q1 correctly."""
+        services.record_answers(attempt, {self.q1.pk: right(self.q1).pk})
+        if expired:
+            now = timezone.now()
+            Attempt.objects.filter(pk=attempt.pk).update(started_at=now - timedelta(minutes=31), deadline=now - timedelta(seconds=1))
+        return services.submit_attempt(Attempt.objects.get(pk=attempt.pk))
+
+    def test_1_starting_creates_an_in_progress_attempt(self):
+        self.login(self.alice)
+        self.client.post(self.start_url())
+        attempt = Attempt.objects.get()
+        self.assertEqual((attempt.status, attempt.score, attempt.submitted_at), ("IN_PROGRESS", None, None))
+
+    def test_2_starting_again_while_in_progress_resumes_the_same_attempt(self):
+        self.login(self.alice)
+        first = self.client.post(self.start_url())
+        attempt = Attempt.objects.get()
+        again = self.client.post(self.start_url())
+        self.assertRedirects(again, self.attempt_url(attempt), fetch_redirect_response=False)
+        self.assertEqual(first.url, again.url)
+        self.assertEqual(Attempt.objects.count(), 1)
+        resumed, created = services.start_attempt(self.alice.student_profile, self.test201)
+        self.assertEqual((resumed.pk, created), (attempt.pk, False))
+
+    def check_finalized_start_is_refused(self, expired):
+        attempt = self.start(self.alice)
+        final = self.finalize(attempt, expired=expired)
+        expected_status = "EXPIRED" if expired else "SUBMITTED"
+        self.assertEqual(final.status, expected_status)
+        snapshot = self.db_state()
+
+        # service level: explicit refusal that carries the existing attempt
+        with self.assertRaises(services.AttemptFinalized) as ctx:
+            services.start_attempt(self.alice.student_profile, self.test201)
+        self.assertEqual(ctx.exception.attempt.pk, attempt.pk)
+
+        # view level, with forged fields trying to reopen it
+        self.login(self.alice)
+        response = self.client.post(
+            self.start_url(), {"status": "IN_PROGRESS", "score": "", "deadline": "2999-01-01 00:00", "submitted_at": "", "attempt": attempt.pk}
+        )
+        self.assertRedirects(response, self.attempt_url(attempt), fetch_redirect_response=False)  # goes to the result
+        result = self.client.get(self.attempt_url(attempt))
+        self.assertTemplateUsed(result, "assessments/attempt_result.html")
+        self.assertTemplateNotUsed(result, "assessments/attempt_take.html")
+
+        # no second attempt, and the finalized state/score is exactly as before
+        self.assertEqual(Attempt.objects.count(), 1)
+        self.assertEqual(self.db_state(), snapshot)
+        attempt.refresh_from_db()
+        self.assertEqual((attempt.status, attempt.score, attempt.max_score), (expected_status, 2, 5))
+
+    def test_3_starting_after_submit_does_not_reopen(self):
+        self.check_finalized_start_is_refused(expired=False)
+
+    def test_4_starting_after_expiry_does_not_reopen(self):
+        self.check_finalized_start_is_refused(expired=True)
+
+    def test_5_no_second_attempt_record_in_either_finalized_case(self):
+        for user, expired in ((self.alice, False), (self.bob, True)):
+            attempt = self.start(user)
+            self.finalize(attempt, expired=expired)
+            self.login(user)
+            for _ in range(3):
+                self.client.post(self.start_url())
+            self.assertEqual(Attempt.objects.filter(student=user.student_profile, test=self.test201).count(), 1)
+
+    def test_overdue_in_progress_attempt_is_expired_not_resumed_by_start(self):
+        attempt = self.start(self.alice)
+        now = timezone.now()
+        Attempt.objects.filter(pk=attempt.pk).update(started_at=now - timedelta(minutes=31), deadline=now - timedelta(seconds=1))
+        self.login(self.alice)
+        self.client.post(self.start_url())
+        attempt.refresh_from_db()
+        self.assertEqual(attempt.status, "EXPIRED")
+        self.assertEqual(Attempt.objects.count(), 1)
+
+    def test_finalized_attempt_is_not_reopened_even_after_the_window_closes_or_test_is_archived(self):
+        attempt = self.start(self.alice)
+        self.finalize(attempt)
+        services.archive_test(self.test201)
+        self.login(self.alice)
+        # archived: the student can no longer even start (404), and the attempt stays finalized
+        self.assertEqual(self.client.post(self.start_url()).status_code, 404)
+        self.assertEqual(Attempt.objects.get().status, "SUBMITTED")
+
+    def test_database_constraint_still_blocks_a_second_row(self):
+        attempt = self.start(self.alice)
+        self.finalize(attempt)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Attempt.objects.create(student=attempt.student, test=self.test201, deadline=timezone.now() + timedelta(minutes=5))
+
+
+# --------------------------------------------------------------------------------
+# SAFE ARCHIVE TRANSITION (PUBLISHED -> ARCHIVED only)
+# --------------------------------------------------------------------------------
+class ArchiveTransitionTests(AssessmentTestCase):
+    def archive_url(self, test):
+        return reverse("assessments:test_archive", args=[test.pk])
+
+    def test_1_published_test_can_be_archived(self):
+        self.login(self.lect1)
+        self.client.post(self.archive_url(self.test201))
+        self.test201.refresh_from_db()
+        self.assertEqual(self.test201.status, "ARCHIVED")
+        self.assertIsNotNone(self.test201.published_at)
+
+    def test_2_draft_cannot_be_archived(self):
+        draft = build_test(self.cyb201, self.lect1, publish=False, title="D")
+        with self.assertRaises(services.StateError):
+            services.archive_test(draft)
+        self.login(self.lect1)
+        self.client.post(self.archive_url(draft))
+        draft.refresh_from_db()
+        self.assertEqual((draft.status, draft.published_at), ("DRAFT", None))
+
+    def test_3_archived_test_cannot_be_archived_again(self):
+        services.archive_test(self.test201)
+        self.test201.refresh_from_db()
+        stamp = self.test201.updated_at
+        with self.assertRaises(services.StateError):
+            services.archive_test(self.test201)
+        self.login(self.lect1)
+        self.client.post(self.archive_url(self.test201))
+        self.test201.refresh_from_db()
+        self.assertEqual((self.test201.status, self.test201.updated_at), ("ARCHIVED", stamp))
+
+    def test_4_stale_object_cannot_cause_an_invalid_transition(self):
+        stale = Test.objects.get(pk=self.test201.pk)  # in memory: PUBLISHED
+        services.archive_test(self.test201)  # someone else archives first
+        self.assertEqual(stale.status, "PUBLISHED")
+        with self.assertRaises(services.StateError):
+            services.archive_test(stale)
+        self.assertEqual(Test.objects.get(pk=stale.pk).status, "ARCHIVED")
+
+    def test_4b_race_between_the_check_and_the_write_is_caught_by_compare_and_set(self):
+        from unittest import mock
+
+        def lose_the_race():
+            Test.objects.filter(pk=self.test201.pk).update(status="ARCHIVED")  # a competitor wins after our read
+            return True
+
+        with mock.patch.object(Test, "is_published", new_callable=mock.PropertyMock, side_effect=lose_the_race):
+            with self.assertRaises(services.StateError):
+                services.archive_test(self.test201)
+        # The competitor's write ran inside our transaction here, so it is rolled back with the
+        # refusal; the point is that the compare-and-set refused instead of overwriting.
+
+    def test_4c_archive_never_moves_a_test_backwards_or_sideways(self):
+        for status in ("DRAFT", "ARCHIVED"):
+            t = build_test(self.cyb203, self.lect1, publish=False, title=status)
+            if status == "ARCHIVED":
+                t = services.publish_test(t)
+                services.archive_test(t)
+            before = Test.objects.get(pk=t.pk)
+            with self.assertRaises(services.StateError):
+                services.archive_test(t)
+            after = Test.objects.get(pk=t.pk)
+            self.assertEqual((before.status, before.published_at, before.updated_at), (after.status, after.published_at, after.updated_at))
+
+    def test_5_other_lecturer_cannot_archive(self):
+        self.login(self.lect2)
+        self.assertEqual(self.client.post(self.archive_url(self.test201)).status_code, 404)
+        self.assertEqual(Test.objects.get(pk=self.test201.pk).status, "PUBLISHED")
+
+    def test_6_students_cannot_archive(self):
+        for student in (self.alice, self.carol):
+            self.login(student)
+            self.assertEqual(self.client.post(self.archive_url(self.test201)).status_code, 404)
+        self.assertEqual(Test.objects.get(pk=self.test201.pk).status, "PUBLISHED")
+
+    def test_forged_status_fields_are_ignored(self):
+        draft = build_test(self.cyb201, self.lect1, publish=False, title="D")
+        self.login(self.lect1)
+        self.client.post(self.archive_url(draft), {"status": "ARCHIVED", "archived": "true", "published": "true"})
+        self.assertEqual(Test.objects.get(pk=draft.pk).status, "DRAFT")
+        self.client.post(self.archive_url(self.test201), {"status": "DRAFT", "published": "false"})
+        self.assertEqual(Test.objects.get(pk=self.test201.pk).status, "ARCHIVED")  # archived because the route says so
+
+    def test_7_lifecycle_is_draft_published_archived(self):
+        t = build_test(self.cyb201, self.lect1, publish=False, title="Life")
+        self.assertEqual(t.status, "DRAFT")
+        t = services.publish_test(t)
+        self.assertEqual(t.status, "PUBLISHED")
+        t = services.archive_test(t)
+        self.assertEqual(t.status, "ARCHIVED")
+        self.assertEqual({s for s, _ in Test.Status.choices}, {"DRAFT", "PUBLISHED", "ARCHIVED"})
+        with self.assertRaises(services.StateError):  # cannot go back to draft or publish again
+            services.publish_test(t)

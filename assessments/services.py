@@ -155,37 +155,67 @@ def publish_test(test, now=None):
 
 
 def archive_test(test, now=None):
+    """PUBLISHED -> ARCHIVED, and only that transition.
+
+    The row is re-read and locked inside the transaction (a no-op lock on SQLite, which
+    serializes writers; a row lock elsewhere), the state is checked on that fresh row, and the
+    write is a compare-and-set, so a stale object or a concurrent change can never produce a
+    DRAFT -> ARCHIVED or ARCHIVED -> ARCHIVED transition. The new status is a server constant.
+    """
     now = now or timezone.now()
-    changed = Test.objects.filter(pk=test.pk, status=Test.Status.PUBLISHED).update(
-        status=Test.Status.ARCHIVED, updated_at=now
-    )
-    if not changed:
-        raise StateError("Only a published test can be archived.")
+    with transaction.atomic():
+        current = Test.objects.select_for_update().get(pk=test.pk)
+        if not current.is_published:
+            raise StateError("Only a published test can be archived.")
+        changed = Test.objects.filter(pk=current.pk, status=Test.Status.PUBLISHED).update(
+            status=Test.Status.ARCHIVED, updated_at=now
+        )
+        if not changed:
+            raise StateError("Only a published test can be archived.")
     return Test.objects.get(pk=test.pk)
 
 
 # --- Taking a test ----------------------------------------------------------------------
 
-def start_attempt(student, test, now=None):
-    """Create the student's attempt, or return the existing one. Returns (attempt, created).
+class AttemptFinalized(StateError):
+    """The student already has a SUBMITTED or EXPIRED attempt; it is shown, never reopened."""
 
-    The unique (student, test) constraint is what guarantees a single attempt; get_or_create
-    turns a lost race into a plain "get". The caller has already checked can_start_attempt
-    (or is resuming an attempt the student owns).
+    def __init__(self, attempt):
+        super().__init__("You have already completed this test.")
+        self.attempt = attempt
+
+
+def start_attempt(student, test, now=None):
+    """State-aware start. Returns (attempt, created).
+
+        no attempt            -> create an IN_PROGRESS attempt        (created=True)
+        IN_PROGRESS attempt   -> resume it                            (created=False)
+        SUBMITTED / EXPIRED   -> raise AttemptFinalized(attempt); nothing is created or changed
+
+    An in-progress attempt that is already past its deadline is expired first, so it cannot be
+    "resumed" by starting again. The unique (student, test) constraint still backs the
+    one-attempt policy: get_or_create turns a lost race into a plain "get", and a finalized
+    row found that way is refused like any other. The caller has checked can_take_test and,
+    for a first attempt, can_start_attempt.
     """
     now = now or timezone.now()
+    # Decide inside the transaction, but raise AFTER it commits: raising inside would roll back
+    # the lazy expiry done below, leaving an overdue attempt still IN_PROGRESS.
     with transaction.atomic():
         fresh = Test.objects.get(pk=test.pk)
         existing = Attempt.objects.filter(student=student, test=fresh).first()
-        if existing:
-            return existing, False
-        if not fresh.is_open(now):
-            raise StateError("This test is not open for new attempts.")
-        attempt, created = Attempt.objects.get_or_create(
-            student=student,
-            test=fresh,
-            defaults={"started_at": now, "deadline": now + timedelta(minutes=fresh.duration_minutes)},
-        )
+        if existing is not None:
+            attempt, created = expire_if_overdue(existing, now), False
+        else:
+            if not fresh.is_open(now):
+                raise StateError("This test is not open for new attempts.")
+            attempt, created = Attempt.objects.get_or_create(
+                student=student,
+                test=fresh,
+                defaults={"started_at": now, "deadline": now + timedelta(minutes=fresh.duration_minutes)},
+            )
+    if not attempt.is_in_progress:
+        raise AttemptFinalized(attempt)
     return attempt, created
 
 

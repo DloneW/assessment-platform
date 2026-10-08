@@ -225,6 +225,10 @@ def attempt_start(request, pk):
         return redirect("assessments:test_intro", pk=test.pk)
     try:
         attempt, _created = services.start_attempt(student, test)
+    except services.AttemptFinalized as done:
+        # Already submitted or expired: show the result; never re-enter the test.
+        messages.error(request, str(done))
+        return redirect("assessments:attempt_detail", test_pk=test.pk, pk=done.attempt.pk)
     except services.StateError as exc:
         messages.error(request, str(exc))
         return redirect("assessments:test_intro", pk=test.pk)

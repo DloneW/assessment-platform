@@ -144,6 +144,8 @@ Student:   eligible published test -> Start attempt -> Answer (save) -> Submit -
 
 **Major security decisions.**
 - One attempt per student per test, enforced by a unique constraint (never two active attempts; no retakes in this version). `get_or_create` turns a lost race into a plain "get".
+- Starting is state-aware: no attempt creates one, an IN_PROGRESS attempt is resumed, and a SUBMITTED or EXPIRED attempt is never reopened (the student is sent to the result and no second attempt is created). An overdue in-progress attempt is expired first.
+- Archiving is PUBLISHED -> ARCHIVED only: the row is re-read and locked in a transaction, checked, then updated with a compare-and-set.
 - Finalization is a compare-and-set (`UPDATE ... WHERE status = 'IN_PROGRESS'`), so a double submit changes nothing.
 - Answer chain: attempt owner -> attempt belongs to the test in the URL -> in progress and before deadline -> question belongs to that test -> choice belongs to that question. A bad pair rejects the whole request (400) and writes nothing.
 - Database constraints cover duration bounds, window order, publication state, one correct choice per question, unique ordering, attempt state/score consistency and one answer per question per attempt. Two cross-table rules (question in the attempt's test, choice in the question) are enforced in `StudentAnswer.save()` and the service.
