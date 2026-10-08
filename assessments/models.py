@@ -51,6 +51,7 @@ class Test(models.Model):
                 condition=Q(duration_minutes__gte=1, duration_minutes__lte=MAX_DURATION_MINUTES),
                 name="assessments_test_duration_valid",
             ),
+            models.CheckConstraint(condition=~Q(title=""), name="assessments_test_title_not_blank"),
             models.CheckConstraint(
                 condition=Q(opens_at__isnull=True) | Q(closes_at__isnull=True) | Q(closes_at__gt=F("opens_at")),
                 name="assessments_test_window_valid",
@@ -97,6 +98,8 @@ class Question(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["test", "order"], name="assessments_question_order_unique"),
             models.CheckConstraint(condition=Q(marks__gte=1), name="assessments_question_marks_positive"),
+            models.CheckConstraint(condition=~Q(text=""), name="assessments_question_text_not_blank"),
+            models.CheckConstraint(condition=Q(order__gte=1), name="assessments_question_order_positive"),
         ]
 
     def __str__(self):
@@ -114,6 +117,8 @@ class Choice(models.Model):
         ordering = ["order"]
         constraints = [
             models.UniqueConstraint(fields=["question", "order"], name="assessments_choice_order_unique"),
+            models.CheckConstraint(condition=~Q(text=""), name="assessments_choice_text_not_blank"),
+            models.CheckConstraint(condition=Q(order__gte=1), name="assessments_choice_order_positive"),
             # At most one correct choice per question. "Exactly one" (so at least one) is checked when publishing.
             models.UniqueConstraint(
                 fields=["question"], condition=Q(is_correct=True), name="assessments_choice_one_correct_per_question"
@@ -158,6 +163,16 @@ class Attempt(models.Model):
             ),
             models.CheckConstraint(
                 condition=Q(score__isnull=True) | Q(score__lte=F("max_score")), name="assessments_attempt_score_within_max"
+            ),
+            # Time must make sense: never submitted before it started, and a SUBMITTED attempt was
+            # handed in strictly before the deadline (at or after it the clock expires the attempt).
+            models.CheckConstraint(
+                condition=Q(submitted_at__isnull=True) | Q(submitted_at__gte=F("started_at")),
+                name="assessments_attempt_submitted_after_start",
+            ),
+            models.CheckConstraint(
+                condition=~Q(status="SUBMITTED") | Q(submitted_at__lt=F("deadline")),
+                name="assessments_attempt_submitted_before_deadline",
             ),
         ]
 

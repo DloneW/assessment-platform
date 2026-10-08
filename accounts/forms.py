@@ -1,3 +1,5 @@
+import unicodedata
+
 from django import forms
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -33,6 +35,14 @@ class StudentRegistrationForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         for name in ("first_name", "last_name", "email"):
             self.fields[name].required = True
+
+    def clean_username(self):
+        # NFKC like Django's login form, so what is stored is what a user can later type;
+        # case-insensitive uniqueness stops "Alice" registering beside "alice".
+        username = unicodedata.normalize("NFKC", self.cleaned_data["username"])
+        if User.objects.filter(username__iexact=username).exists():
+            raise ValidationError("A user with this username already exists.")
+        return username
 
     def clean_email(self):
         email = User.objects.normalize_email(self.cleaned_data["email"]).strip()

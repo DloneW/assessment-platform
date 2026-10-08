@@ -15,6 +15,7 @@ Expiry is lazy: an overdue attempt is finalized as EXPIRED the next time anythin
 because every write path re-checks the clock.
 """
 
+import re
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
@@ -24,6 +25,9 @@ from django.utils import timezone
 from .models import MAX_DURATION_MINUTES, Attempt, Choice, Question, StudentAnswer, Test
 
 MAX_SELECTIONS_PER_REQUEST = 500
+# ASCII digits only and a bounded length: int() would also accept '1_0', '+1', ' 1' and non-ASCII digits.
+_ANSWER_KEY = re.compile(r"q_([0-9]{1,18})")
+_ID_VALUE = re.compile(r"[0-9]{1,18}")
 
 
 class StateError(Exception):
@@ -226,11 +230,10 @@ def parse_selections(post):
     for key, value in post.items():
         if not key.startswith("q_"):
             continue
-        try:
-            question_id, choice_id = int(key[2:]), int(value)
-        except (TypeError, ValueError):
-            raise InvalidAnswer("Malformed answer.") from None
-        selections[question_id] = choice_id
+        key_match = _ANSWER_KEY.fullmatch(key)
+        if key_match is None or _ID_VALUE.fullmatch(value) is None:
+            raise InvalidAnswer("Malformed answer.")
+        selections[int(key_match.group(1))] = int(value)
     if len(selections) > MAX_SELECTIONS_PER_REQUEST:
         raise InvalidAnswer("Too many answers.")
     return selections

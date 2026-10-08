@@ -30,6 +30,11 @@ class User(AbstractUser):
                 name="accounts_user_email_ci_unique",
                 violation_error_message="A user with this email already exists.",
             ),
+            models.UniqueConstraint(
+                Lower("username"),
+                name="accounts_user_username_ci_unique",
+                violation_error_message="A user with this username already exists.",
+            ),
         ]
 
     def __str__(self):

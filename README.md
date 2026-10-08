@@ -2,7 +2,7 @@
 
 A server-rendered Django web application for online student assessments. Students, lecturers and administrators will eventually take and manage timed tests with server-side scoring.
 
-**Status: Day 3 complete (assessment engine).**
+**Status: Day 4 complete (security testing and hardening). Not production-ready; see Security > Known limitations.**
 
 Implemented:
 - Authentication (Django sessions; register, login, logout)
@@ -15,8 +15,9 @@ Implemented:
 - Protected dashboards for students, lecturers and administrators
 - Authorization and security regression tests
 - Assessment engine: tests, questions, choices, timed attempts, server-side scoring and results
+- Security attack tests and hardening (Day 4)
 
-**Not implemented yet** (later days): deployment hardening, lecturer result views, retakes, analytics.
+**Not implemented yet** (later days): deployment configuration, lecturer result views, retakes, analytics.
 
 ## Tech stack
 
@@ -59,6 +60,7 @@ python manage.py check
 python manage.py makemigrations --check --dry-run
 python manage.py test                  # everything
 python manage.py test authorization    # authorization and security boundary tests
+python manage.py test assessments.test_security   # Day 4 attack simulation
 ```
 
 ## URLs
@@ -163,4 +165,46 @@ Student:   eligible published test -> Start attempt -> Answer (save) -> Submit -
 
 ### Not implemented yet (later days)
 
-Security hardening and deployment configuration, lecturer result views and analytics, retakes. Proctoring, AI question generation, leaderboards, certificates, APIs, Redis, Celery and WebSockets are out of scope.
+Deployment configuration, lecturer result views and analytics, retakes. Proctoring, AI question generation, leaderboards, certificates, APIs, Redis, Celery and WebSockets are out of scope.
+
+## Security (Day 4)
+
+This section describes what the application enforces and how it was tested. It is not a claim that the application is production-ready or free of vulnerabilities; see "Known limitations" below.
+
+**Authentication.** Django's built-in sessions and auth. Passwords are hashed by Django and checked by its validators; logout is POST-only and destroys the server-side session (a copied session cookie is dead after logout); the session id changes at login; `next=` redirects are restricted to this host. Usernames are NFKC-normalized (matching the login form) and unique case-insensitively, as are emails and student IDs.
+
+**Authorization and attribute-based access control.** Every decision goes through `authorization/services.py`: role -> attributes (department, level, enrollment, active course) -> ownership/assignment -> resource state. Views never decide access themselves. Public registration only ever creates a STUDENT; role, group, staff and superuser values in a request are ignored.
+
+**Object ownership and information disclosure.** Objects the user may not access (another lecturer's test, another student's attempt or profile, a course outside their attributes) return the same bare 404 as a missing id, tested by comparing response bodies. Role-gated pages return 403, anonymous users are redirected to login. Ids beyond the database range are a clean 404/400, not a 500.
+
+**State transition protection.** Test: DRAFT -> PUBLISHED -> ARCHIVED only. Attempt: IN_PROGRESS -> SUBMITTED or EXPIRED only. Status, score, `started_at`, `deadline`, `submitted_at` and similar fields are never read from a request; transitions run in services as transactions with compare-and-set updates, and CHECK constraints in the database reject impossible combinations. The Django admin respects the same freeze: a published test and its questions cannot be edited there, and status/publication time are read-only.
+
+**Attempt integrity.** One attempt per student per test (unique constraint); finalized attempts are never reopened; answers are accepted only from the owner, before the deadline, while IN_PROGRESS, for a question of the attempt's test and a choice of that question; any bad pair rejects the whole request. Answer ids are parsed strictly (ASCII digits, bounded length).
+
+**Server-side scoring and timing.** The score is computed from stored answers and the answer key when the attempt is finalized and then stored. The deadline is `started_at + duration`, stored at start and compared with the server clock on every save and submit; the JavaScript countdown is display only.
+
+**CSRF and XSS.** CSRF middleware is on and every state-changing route was tested to return 403 without a token. Templates rely on Django autoescaping; a test scans for `|safe`, `autoescape off` and `mark_safe`, and script/attribute payloads in registration, course, test, question and choice fields are verified as escaped on every page that shows them. All queries use the ORM (a test scans for raw SQL). Authenticated responses are sent `Cache-Control: no-store` so results and the answer key are not recoverable from the browser cache after logout.
+
+**Database constraints.** Case-insensitive unique username, email and student ID; unique enrollment; unique attempt per student/test; unique answer per attempt/question; one correct choice per question; unique question/choice order; non-blank titles and texts; positive marks and orders; duration bounds; attempt state, score, and timestamp consistency (a SUBMITTED attempt is submitted after it started and before its deadline).
+
+**Security testing.** `assessments/test_security.py` attacks the application with HTTP requests (IDOR and privilege escalation in both directions, every edge of both state machines, forged protected fields, answer/score/time tampering, malformed and oversized input, CSRF, XSS, admin-site bypass, constraint violations), alongside `authorization/test_boundary.py` and the Day 2/3 suites. Key guards were also checked by mutation: removing each made at least one test fail.
+
+### Findings fixed in Day 4
+
+| Finding | Fix |
+|---|---|
+| Django admin could add questions to, or change the course/creator/duration of, a published test | Admin forms limit questions to draft tests; published tests are fully read-only; course/creator fixed after creation |
+| Usernames unique case-sensitively; fullwidth/compatibility characters stored un-normalized | NFKC normalization, form check and a `Lower(username)` unique constraint |
+| Answer-id parsing accepted `1_0`, `+1`, non-ASCII digits | Strict ASCII-digit regex with bounded length |
+| Authenticated pages (results, answer key) cacheable by the browser | `Cache-Control: no-store` middleware |
+| Database accepted blank titles/texts, order 0, and impossible `submitted_at` values | New CHECK constraints |
+
+### Known limitations (not solved in Day 4)
+
+- **No question snapshot.** Scores are computed from the live question/choice rows at finalization. The application and admin freeze published tests, so this cannot be changed through them, but direct database/shell edits to a published test could alter the scoring of attempts still in progress. A finalized attempt keeps its stored score.
+- **Attempt rights follow ownership.** A student already in an attempt may finish it if later unenrolled or if the test is archived; new starts are refused.
+- **No login or registration throttling**, no account lockout, no MFA, no email verification. Registration reveals whether a username, email or student ID is taken.
+- **Self-asserted identity** (student ID, department, level) is not verified; enrollment by staff is the second gate.
+- **Staff with Django-admin permissions are trusted** for the data those permissions cover (for example enrollments and lecturer assignments).
+- **Lazy expiry**, no background job; no audit log; no password-reset flow.
+- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not enabled (`python manage.py check --deploy` lists them), and SQLite is a development database.

@@ -17,11 +17,26 @@ class TestAdmin(admin.ModelAdmin):
     # Publication state is set by the publish workflow (which validates the test), not by hand.
     readonly_fields = ("status", "published_at", "created_at", "updated_at")
 
+    def get_readonly_fields(self, request, obj=None):
+        """Once a test exists its course and creator are fixed; once published, everything is."""
+        fields = tuple(super().get_readonly_fields(request, obj))
+        if obj is None:
+            return fields
+        if obj.is_draft:
+            return fields + ("course", "creator")
+        return fields + tuple(f.name for f in Test._meta.fields if f.name not in fields)
+
 
 @admin.register(Question)
 class QuestionAdmin(admin.ModelAdmin):
     list_display = ("test", "order", "text", "marks")
     inlines = [ChoiceInline]
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # Questions can only be attached to (or moved to) a draft test: a published test is frozen.
+        if db_field.name == "test":
+            kwargs["queryset"] = Test.objects.filter(status=Test.Status.DRAFT)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     def _locked(self, obj):
         return obj is not None and not obj.test.is_draft
