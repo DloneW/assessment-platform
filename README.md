@@ -2,7 +2,7 @@
 
 A server-rendered Django web application for online student assessments. Students, lecturers and administrators will eventually take and manage timed tests with server-side scoring.
 
-**Status: Day 4 complete (security testing and hardening). Not production-ready; see Security > Known limitations.**
+**Status: Day 5 deployment preparation complete and verified locally (gunicorn + PostgreSQL 16). Public deployment to a hosting platform has NOT been performed or verified yet; see "Deployment" below. Not claimed production-ready; see Security > Known limitations.**
 
 Implemented:
 - Authentication (Django sessions; register, login, logout)
@@ -22,7 +22,8 @@ Implemented:
 ## Tech stack
 
 - Python 3.13, Django 5.2
-- Django ORM with SQLite (development)
+- Django ORM with SQLite (development) and PostgreSQL (production, via `DATABASE_URL`)
+- gunicorn (WSGI server) and WhiteNoise (static files) for deployment
 - Django templates and Forms
 - Django's built-in authentication and sessions
 
@@ -123,7 +124,7 @@ Roles can also be changed in the Django admin (Users -> Groups), but only by sup
 
 - **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
 - **No login throttling.** Repeated password guesses are not rate-limited.
-- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not set (`python manage.py check --deploy` lists them). Set them when deploying; they would break plain-HTTP local runs if forced on now.
+- **Production flags** (HTTPS-only cookies, HSTS, SSL redirect) are configured for `DEBUG=False`; see "Deployment".
 
 ## Assessment engine (Day 3)
 
@@ -157,7 +158,7 @@ Student:   eligible published test -> Start attempt -> Answer (save) -> Submit -
 
 - **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
 - **No login throttling.** Repeated password guesses are not rate-limited.
-- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not set (`python manage.py check --deploy` lists them). Set them when deploying.
+- **Production flags** are configured for `DEBUG=False`; see "Deployment".
 - **Lazy expiry.** No background job: an overdue attempt becomes EXPIRED the next time it or its student's dashboard is opened. Nothing can be written to it meanwhile.
 - **One attempt, no retakes**; lecturers cannot yet view students' attempts or results (only the owner can; admins can audit read-only in the Django admin).
 - `bulk_create` and queryset `.update()` bypass `StudentAnswer.save()` checks; application writes go through the services.
@@ -207,4 +208,75 @@ This section describes what the application enforces and how it was tested. It i
 - **Self-asserted identity** (student ID, department, level) is not verified; enrollment by staff is the second gate.
 - **Staff with Django-admin permissions are trusted** for the data those permissions cover (for example enrollments and lecturer assignments).
 - **Lazy expiry**, no background job; no audit log; no password-reset flow.
-- **Not production-configured.** HTTPS-only cookies, HSTS and SSL redirect are not enabled (`python manage.py check --deploy` lists them), and SQLite is a development database.
+- **Hosted deployment not yet verified.** The production configuration exists and was tested locally, but real TLS, the hosting platform's proxy and its managed database have not been exercised (see "Deployment").
+
+## Deployment (Day 5)
+
+### What is and is not verified
+
+Verified locally with `DEBUG=False`, gunicorn and PostgreSQL 16 (a local server, not a hosted one): migrations, `collectstatic`, `check --deploy`, the full 284-test suite on PostgreSQL, a clean-checkout build in a fresh virtualenv, and a 60-check HTTP smoke test (student, lecturer and admin flows, authorization, CSRF, cookies, caching, logout) run against gunicorn with `X-Forwarded-Proto: https` standing in for the platform's TLS proxy.
+
+**Not verified:** a public deployment. The hosting platforms could not be reached from the development sandbox, so the Render blueprint (`render.yaml`) is untested on Render itself, real HTTPS/certificates and the browser's behaviour with `Secure` cookies and HSTS have not been exercised end to end, and no hosted PostgreSQL has been used. Treat the first real deployment as the verification step and run the checklist below.
+
+### Prerequisites
+
+Python 3.13, PostgreSQL (production), a host that runs a WSGI process and terminates HTTPS. No Docker or frontend build is needed.
+
+### Environment variables
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `DJANGO_SECRET_KEY` | Signing key. **Required when `DJANGO_DEBUG` is off**; the app refuses to start without it. | none |
+| `DJANGO_DEBUG` | `True` only for local development | `False` |
+| `DJANGO_ALLOWED_HOSTS` | Comma-separated hostnames | `localhost,127.0.0.1` |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | Comma-separated `https://host` origins | empty |
+| `RENDER_EXTERNAL_HOSTNAME` | Set by Render; added to allowed hosts and trusted origins | unset |
+| `DATABASE_URL` | `postgres://user:pass@host:5432/name?sslmode=require`; without it SQLite is used | unset |
+| `DJANGO_BEHIND_TLS_PROXY` | Trust `X-Forwarded-Proto` from the platform's proxy. **Only enable behind a proxy that sets it on every request**; otherwise leave off or clients could spoof HTTPS. Required on platforms that terminate TLS, or the HTTPS redirect loops. | `False` |
+| `DJANGO_SECURE_SSL_REDIRECT`, `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE` | Override the secure defaults | on when `DEBUG` is off |
+| `DJANGO_HSTS_SECONDS` | HSTS lifetime. Starts at one day; raise (e.g. `31536000`) once HTTPS is verified. | `86400` when `DEBUG` is off |
+| `DJANGO_HSTS_INCLUDE_SUBDOMAINS`, `DJANGO_HSTS_PRELOAD` | HSTS options; preload is a deliberate opt-in | on / off |
+| `DJANGO_DB_CONN_MAX_AGE` | Persistent DB connection seconds | `60` |
+| `DJANGO_LOG_LEVEL` | Console log level | `INFO` |
+| `DJANGO_SKIP_DOTENV` | Ignore a local `.env` (used by the deployment tests) | unset |
+
+Real environment variables always override `.env`. Never commit secrets; `.env` is git-ignored and `render.yaml` generates the secret key on the host.
+
+### Local setup (development)
+
+As in "Setup" above: `.env` with `DJANGO_DEBUG=True`, SQLite, plain HTTP, no secure-cookie or redirect settings. Running with production settings locally needs HTTPS or the proxy header; the quickest check is `DJANGO_DEBUG=False`, `DJANGO_BEHIND_TLS_PROXY=True` and requests carrying `X-Forwarded-Proto: https` and a matching `Host`.
+
+### Production configuration (what `DEBUG=False` switches on)
+
+- `SESSION_COOKIE_SECURE`, `CSRF_COOKIE_SECURE`, HttpOnly session cookie, `SameSite=Lax`.
+- `SECURE_SSL_REDIRECT`, HSTS (one day by default, with subdomains, no preload), `SECURE_PROXY_SSL_HEADER` only when `DJANGO_BEHIND_TLS_PROXY` is set.
+- `nosniff`, `Referrer-Policy: same-origin`, `Cross-Origin-Opener-Policy: same-origin`, `X-Frame-Options: DENY`.
+- Console logging, so 500 tracebacks reach the platform's log viewer (403s from permission checks also appear as warnings).
+- WhiteNoise serves `collectstatic` output from `staticfiles/` (`CompressedStaticFilesStorage`, no manifest, so a missing `collectstatic` degrades to the app's own static handling rather than crashing templates).
+- `python manage.py check --deploy` reports a single warning, `security.W021` (HSTS preload). It is intentionally not enabled: preload submission is hard to undo and should be chosen after the domain has run HTTPS-only. With `DJANGO_HSTS_PRELOAD=True` and `DJANGO_HSTS_SECONDS=31536000` the check reports no issues (tested).
+
+### Database, migrations and static files
+
+- Production uses PostgreSQL through `DATABASE_URL`; the ORM and migrations are unchanged. `python manage.py makemigrations --check` reports no changes, and the full test suite passes on PostgreSQL 16 as well as SQLite.
+- Apply migrations on every deploy: `python manage.py migrate --noinput` (`render.yaml` runs it at start).
+- `python manage.py collectstatic --noinput` (run by `build.sh`) copies the 127 admin files into `staticfiles/`. There is no frontend build; the app's own pages use inline CSS.
+
+### Deploying on Render (prepared, not yet executed)
+
+1. Push this repository to GitHub.
+2. Render dashboard -> **New -> Blueprint**, select the repository. `render.yaml` defines the web service (`build.sh`, then `migrate` + gunicorn) and a free PostgreSQL database, and generates `DJANGO_SECRET_KEY`.
+3. After the first deploy, open `https://<service>.onrender.com/login/`. The service's hostname is allowed automatically; for a custom domain also set `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS`.
+4. Create the first administrator. Render's free tier has no shell, so either set `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, `DJANGO_SUPERUSER_PASSWORD` once and run `python manage.py createsuperuser --noinput` (for example temporarily prefixed to the start command), then remove them; or run the command from a paid-plan shell. Never commit these values.
+5. In `/admin/` create a Department, a Level and Courses, assign lecturers (`python manage.py assign_role <username> LECTURER` then Courses -> Lecturers) and enrol students.
+
+Free-tier caveats: the web service sleeps when idle, and Render's free PostgreSQL expires after a time limit; use a paid database for anything that must persist.
+
+Other hosts work the same way: a Python 3.13 build running `./build.sh`, a start command of `python manage.py migrate --noinput && gunicorn config.wsgi:application`, the environment variables above, and `DJANGO_BEHIND_TLS_PROXY=True` if the platform terminates TLS.
+
+### First-deployment checklist
+
+`check --deploy` on the host; open the site over HTTPS and confirm HTTP redirects; inspect the `Set-Cookie` flags and security headers; register a student; enrol them in the admin; publish a test as a lecturer; take it, submit, view the result; log out and confirm the result URL redirects to login; confirm a second lecturer and a second student get 404 on the first one's objects; confirm the admin shows a published test read-only. Then raise `DJANGO_HSTS_SECONDS`.
+
+### Known limitations (unchanged by Day 5)
+
+Day 5 added deployment configuration only. It did **not** address: question snapshots, MFA, email verification, login/registration throttling, audit logging, self-asserted identity, or lazy expiry (see the Security section). In addition: HSTS preload is off, there is no error-monitoring service, no backups are configured, WhiteNoise and gunicorn run without a CDN or separate static host, and the free-tier Render settings are suitable for demonstration rather than load.
