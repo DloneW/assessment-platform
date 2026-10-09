@@ -35,7 +35,12 @@ class Command(BaseCommand):
         if interactive:
             username = username or input("Username: ")
             email = email or input("Email: ")
-            password = password or getpass.getpass("Password: ")
+            if not password:
+                password = getpass.getpass("Password: ")
+                # Typing is hidden, so ask twice: a typo would otherwise create an account
+                # whose password nobody knows (and this command never overwrites an account).
+                if getpass.getpass("Password (again): ") != password:
+                    raise CommandError("The two passwords did not match. Nothing was created; run the command again.")
         if not (username and email and password):
             self.stdout.write("create_app_admin: nothing to do (no admin details supplied).")
             return

@@ -378,3 +378,25 @@ class CreateAppAdminCommandTests(AuthzTestCase):
         c.post(url("password_change"), {"old_password": self.ENV["DJANGO_APP_ADMIN_PASSWORD"],
                                         "new_password1": "My-Own-Pass-2026z", "new_password2": "My-Own-Pass-2026z"})
         self.assertEqual(c.get(url("console_departments")).status_code, 200)
+
+
+class CreateAppAdminPromptTests(AuthzTestCase):
+    def run_interactive(self, passwords):
+        import os
+        from io import StringIO
+        from unittest import mock
+        from django.core.management import call_command
+        answers = iter(["promptadmin", "prompt@example.com"])
+        env = {k: v for k, v in os.environ.items() if not k.startswith("DJANGO_APP_ADMIN_")}
+        with mock.patch.dict(os.environ, env, clear=True), mock.patch("sys.stdin.isatty", return_value=True), \
+                mock.patch("builtins.input", side_effect=lambda *_: next(answers)), \
+                mock.patch("accounts.management.commands.create_app_admin.getpass.getpass", side_effect=passwords):
+            call_command("create_app_admin", stdout=StringIO())
+
+    def test_password_is_asked_twice_and_a_mismatch_creates_nothing(self):
+        from django.core.management.base import CommandError
+        with self.assertRaises(CommandError):
+            self.run_interactive(["Prompt-Pass-2026x", "Prompt-Pass-2026y"])
+        self.assertFalse(User.objects.filter(username="promptadmin").exists())
+        self.run_interactive(["Prompt-Pass-2026x", "Prompt-Pass-2026x"])
+        self.assertTrue(User.objects.get(username="promptadmin").check_password("Prompt-Pass-2026x"))

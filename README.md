@@ -58,7 +58,7 @@ Create the day-to-day administrator (an application ADMIN: not staff, not a supe
 python manage.py create_app_admin          # prompts for username, email and password
 ```
 
-You are asked to choose your own password at first login. Then use the **Administration console** (below) to add a Department, a Level and Courses; students pick from these when registering at `/register/`. The superuser from `createsuperuser` is only needed for the Django admin site.
+The password is typed twice (the typing is hidden). If you forget it, `python manage.py changepassword <username>` sets a new one. You are asked to choose your own password at first login. Then use the **Administration console** (below) to add a Department, a Level and Courses; students pick from these when registering at `/register/`. The superuser from `createsuperuser` is only needed for the Django admin site.
 
 ## Tests and checks
 
