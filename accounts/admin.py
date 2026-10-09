@@ -52,8 +52,8 @@ class UserAdmin(DjangoUserAdmin):
 
 @admin.register(Department)
 class DepartmentAdmin(admin.ModelAdmin):
-    list_display = ("code", "name", "created_at")
-    search_fields = ("code", "name")
+    list_display = ("name", "created_at")
+    search_fields = ("name",)
 
 
 @admin.register(Level)

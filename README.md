@@ -52,7 +52,13 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-Then open <http://127.0.0.1:8000/admin/> and add at least one **Department** and one **Level**; students pick from these when registering at `/register/`.
+Create the day-to-day administrator (an application ADMIN: not staff, not a superuser) and sign in at `/login/`:
+
+```
+python manage.py create_app_admin          # prompts for username, email and password
+```
+
+You are asked to choose your own password at first login. Then use the **Administration console** (below) to add a Department, a Level and Courses; students pick from these when registering at `/register/`. The superuser from `createsuperuser` is only needed for the Django admin site.
 
 ## Tests and checks
 
@@ -74,6 +80,8 @@ python manage.py test assessments.test_security   # Day 4 attack simulation
 | `/student/dashboard/`   | STUDENT                                           |
 | `/lecturer/dashboard/` | LECTURER                                          |
 | `/admin/dashboard/`    | Application ADMIN (not the Django admin site)     |
+| `/manage/...`          | Application ADMIN: departments, levels, courses, lecturers, account password resets |
+| `/password/change/`    | Any logged-in user (forced after a temporary password) |
 | `/students/<id>/`      | The student themself, or an application ADMIN     |
 | `/courses/<id>/`       | See "Course access" below                         |
 | `/courses/<id>/tests/new/` | Lecturer assigned to the course (or ADMIN)    |
@@ -107,7 +115,22 @@ authorization/
 
 **Django admin guard.** Only superusers can change `is_staff`, `is_superuser`, groups or permissions. In addition, a non-superuser staff member can edit or delete only ordinary accounts (and edit their own): they cannot edit, delete or reset the password of a superuser, an application ADMIN or another staff member, because Django's "change user" permission would otherwise allow taking over those accounts. Grant staff access and model permissions sparingly.
 
-**Enrollment and lecturers.** There is no self-enrollment. Enrollments and lecturer assignments are managed in the Django admin by staff with the relevant permissions.
+**Enrollment and lecturers.** There is no self-enrollment. Lecturer accounts and their course assignments are managed in the Administration console below; enrollments are still managed in the Django admin by staff with the relevant permissions.
+
+### Administration console (in-app)
+
+An application ADMIN (not a superuser) manages the academic setup from the app itself, under `/manage/`:
+
+- **Departments** (a name only; there is no department code): add, rename, delete (refused while it has courses or students). Names are unique ignoring case and spacing.
+- **Levels** and **Courses**: add and edit courses (code, title, department, level, open/closed) and assign lecturers. Only active accounts holding the LECTURER role can be assigned.
+- **Lecturers**: create a lecturer account. The console generates a random 14-character temporary password and shows it **once**; it is never stored in readable form, in the session or in a message.
+- **Accounts & passwords**: search students and lecturers (by name, username, email or matric number) and reset a password. The same one-time temporary-password mechanism applies, and the account's existing sessions are signed out.
+
+A user holding a temporary password is held on `/password/change/` until they choose their own (it must differ from the temporary one and pass the password validators); every other page redirects there, except logout.
+
+Rules that matter: the console is open to the application ADMIN role only (`is_staff` or `is_superuser` alone is not enough); every change is a CSRF-protected POST; privilege fields (`is_staff`, `is_superuser`, groups) are never read from a request, so a lecturer created here can only ever be a lecturer; and passwords can be reset only for ordinary student and lecturer accounts, never for yourself, a superuser, a staff member or another ADMIN (those would be account takeover, so they stay a deliberate, out-of-band operation). A denied or missing account returns the same 404. Console actions are written to the application log by id (never the password). Creating further ADMINs is intentionally not in the console (`create_app_admin` or `assign_role`, run by whoever operates the server).
+
+Limits of the console, stated plainly: a temporary password is shown on the admin's screen and has to be passed to the user by some other channel (there is no email, so no emailed reset link and no self-service "forgot password"); there is still no login throttling, so a short-lived temporary password is guessable in principle until it is replaced; console actions are logged to the application log, not a tamper-resistant audit trail; enrolling students is still done in the Django admin; and an administrator can reset any student's or lecturer's password, so the ADMIN role must be given to few, trusted people. This was tested with the automated suite only; it has not yet been exercised on the deployed site.
 
 ### Creating privileged accounts
 
@@ -118,7 +141,7 @@ python manage.py createsuperuser            # Django admin access (no applicatio
 python manage.py assign_role <username> ADMIN      # or LECTURER / STUDENT; replaces any other role
 ```
 
-Roles can also be changed in the Django admin (Users -> Groups), but only by superusers: for everyone else the staff, superuser, group and permission fields are read-only. Assign lecturers to courses in the admin under Courses -> Lecturers.
+Roles can also be changed in the Django admin (Users -> Groups), but only by superusers: for everyone else the staff, superuser, group and permission fields are read-only. Lecturers are created in, and assigned to courses from, the Administration console.
 
 ### Known limitations
 
@@ -266,8 +289,8 @@ As in "Setup" above: `.env` with `DJANGO_DEBUG=True`, SQLite, plain HTTP, no sec
 1. Push this repository to GitHub.
 2. Render dashboard -> **New -> Blueprint**, select the repository. `render.yaml` defines the web service (`build.sh`, then `migrate` + gunicorn) and a free PostgreSQL database, and generates `DJANGO_SECRET_KEY`.
 3. After the first deploy, open `https://<service>.onrender.com/login/`. The service's hostname is allowed automatically; for a custom domain also set `DJANGO_ALLOWED_HOSTS` and `DJANGO_CSRF_TRUSTED_ORIGINS`.
-4. Create the first administrator. A fresh database has no users, and registration needs a Department and a Level that only an admin can create, so nobody can log in until this is done. Render's free tier has no shell, so the start command runs `createsuperuser --noinput` on every start; it creates the account only if `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL` and `DJANGO_SUPERUSER_PASSWORD` are set and the username does not exist yet (otherwise it fails harmlessly). Render asks for these three values when the Blueprint is applied (or set them under the service's Environment tab and redeploy). Log in at `/admin/`. Once the account exists, delete `DJANGO_SUPERUSER_PASSWORD` from the environment. Never commit these values.
-5. In `/admin/` create a Department, a Level and Courses, assign lecturers (`python manage.py assign_role <username> LECTURER` then Courses -> Lecturers) and enrol students.
+4. Create the first administrator. A fresh database has no users, and registration needs a Department and a Level, so nobody can log in until an admin exists. Render's free tier has no shell, so the start command runs `create_app_admin` on every start. It creates an application ADMIN (not staff, not a superuser) only if `DJANGO_APP_ADMIN_USERNAME`, `DJANGO_APP_ADMIN_EMAIL` and `DJANGO_APP_ADMIN_PASSWORD` are set and that username does not exist yet; otherwise it does nothing, and it never overwrites an existing account. Render asks for these three values when the Blueprint is applied (or set them under the service's Environment tab and redeploy). Use a strong one-time password: you are made to replace it at first login. Afterwards delete `DJANGO_APP_ADMIN_PASSWORD` from the environment. Optionally set `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL` and `DJANGO_SUPERUSER_PASSWORD` the same way for a Django superuser (Django admin site, emergencies only). Never commit these values.
+5. Log in at `/login/` as the application admin and use the Administration console (`/manage/`) to add departments, levels and courses, create lecturers and assign them to courses. Enrol students in the Django admin (superuser or delegated staff).
 
 Free-tier caveats: the web service sleeps when idle, and Render's free PostgreSQL expires after a time limit; use a paid database for anything that must persist.
 

@@ -36,10 +36,11 @@
   <header>
     <a href="/">Assessment Platform</a>
     {% if user.is_authenticated %}
+      <span><a href="{% url 'accounts:password_change' %}" style="font-weight:400;margin-right:1rem">Change password</a>
       <form class="inline" method="post" action="{% url 'accounts:logout' %}">
         {% csrf_token %}
         <button type="submit">Log out</button>
-      </form>
+      </form></span>
     {% endif %}
   </header>
   <main class="{% block main_class %}{% endblock %}">

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Accounts &amp; password resets</h1>
+<form method="get"><label for="q">Search students and lecturers</label>
+  <input id="q" name="q" value="{{ q }}" maxlength="100" placeholder="name, username, email or matric number">
+  <button type="submit">Search</button></form>
+{% for a in accounts %}
+<div class="card">
+  <strong>{{ a.get_full_name|default:a.username }}</strong> <span class="muted">({{ a.username }}, {{ a.email }})</span>
+  {% if not a.is_active %}<span class="tag">inactive</span>{% endif %}
+  <a href="{% url 'accounts:console_reset_password' a.pk %}">Reset password</a>
+</div>
+{% empty %}<p>No matching accounts.</p>{% endfor %}
+<p class="muted">Administrators and superuser accounts are not listed: their passwords cannot be reset here.</p>
+{% endblock %}

@@ -20,6 +20,9 @@ class User(AbstractUser):
     """
 
     email = models.EmailField("email address")
+    # Set when an administrator issues a temporary password (new lecturer, password reset); the
+    # user must choose their own before using anything else. Cleared by the password-change form.
+    must_change_password = models.BooleanField(default=False)
 
     objects = UserManager()
 
@@ -43,14 +46,17 @@ class User(AbstractUser):
 
 class Department(models.Model):
     name = models.CharField(max_length=150, unique=True)
-    code = models.CharField(max_length=20, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(Lower("name"), name="accounts_department_name_ci_unique",
+                                    violation_error_message="A department with this name already exists."),
+        ]
 
     def __str__(self):
-        return f"{self.code} - {self.name}"
+        return self.name
 
 
 class Level(models.Model):

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Levels{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Levels</h1>
+<p>{% for l in levels %}<span class="tag">{{ l }}</span> {% empty %}No levels yet.{% endfor %}</p>
+<h2>Add a level</h2>
+<form method="post" novalidate>
+  {% csrf_token %}{{ form.non_field_errors }}
+  <label for="{{ form.number.id_for_label }}">{{ form.number.label }}</label>
+  {{ form.number }}{{ form.number.errors }}
+  <button type="submit">Add level</button>
+</form>
+{% endblock %}

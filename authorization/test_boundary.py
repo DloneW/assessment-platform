@@ -45,7 +45,21 @@ ROUTE_POLICY = {
     "admin_dashboard": "application ADMIN; GET/HEAD only",
     "student_profile": "owner or ADMIN, else 404; GET/HEAD only",
     "course_detail": "can_access_course, else 404; GET/HEAD only",
+    "password_change": "logged in (any role); GET/POST; clears the temporary-password flag",
+    # In-app administration console: can_manage_directory (application ADMIN) for all of these.
+    "console_departments": "application ADMIN; GET/POST",
+    "console_department_edit": "application ADMIN; GET/POST; missing id 404",
+    "console_department_delete": "POST only; application ADMIN; refused while courses/students exist",
+    "console_levels": "application ADMIN; GET/POST",
+    "console_courses": "application ADMIN; GET/HEAD only",
+    "console_course_add": "application ADMIN; GET/POST",
+    "console_course_edit": "application ADMIN; GET/POST; missing id 404",
+    "console_lecturers": "application ADMIN; GET/HEAD only",
+    "console_lecturer_add": "application ADMIN; GET/POST; creates LECTURER with a one-time temporary password",
+    "console_accounts": "application ADMIN; GET/HEAD only; lists only resettable accounts",
+    "console_reset_password": "application ADMIN + can_reset_password (never self/staff/superuser/ADMIN), else 404; GET/POST",
 }
+OBJECT_ID_ROUTES = {"console_department_edit", "console_department_delete", "console_course_edit", "console_reset_password"}
 # Every URL name in the "assessments" namespace: (allowed method, who, what a denied object gets).
 ASSESSMENT_ROUTE_POLICY = {
     "test_create": ("GET/POST", "can_create_test on the course in the URL, else 404"),
@@ -100,6 +114,8 @@ class BoundaryTestCase(AuthzTestCase):
             return self.profile_url(self.bob)
         if name == "course_detail":
             return self.course_url(self.cyb205)
+        if name in OBJECT_ID_ROUTES:
+            return reverse(f"accounts:{name}", args=[self.alice.pk])
         return reverse(f"accounts:{name}")
 
     def login_as(self, user):
@@ -152,7 +168,7 @@ class RouteInventoryTests(BoundaryTestCase):
     def test_anonymous_users_never_reach_protected_routes(self):
         self.client.logout()
         for name, policy in ROUTE_POLICY.items():
-            if policy == "public" or name == "logout":
+            if policy == "public" or policy.startswith("POST only"):
                 continue
             with self.subTest(route=name):
                 response = self.client.get(self.url_for(name))

@@ -8,7 +8,7 @@
   {% for course in courses %}
   <li>
     <a href="{% url 'accounts:course_detail' course.pk %}">{{ course.code }}</a> &ndash; {{ course.title }}
-    ({{ course.department.code }}, {{ course.level }}){% if not course.is_active %} <em>inactive</em>{% endif %}
+    ({{ course.department.name }}, {{ course.level }}){% if not course.is_active %} <em>inactive</em>{% endif %}
   </li>
   {% endfor %}
 </ul>

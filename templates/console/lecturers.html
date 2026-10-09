@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Lecturers{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Lecturers</h1>
+<p><a href="{% url 'accounts:console_lecturer_add' %}">+ Add a lecturer</a></p>
+{% for l in lecturers %}
+<div class="card">
+  <strong>{{ l.get_full_name|default:l.username }}</strong> <span class="muted">({{ l.username }}, {{ l.email }})</span>
+  {% if not l.is_active %}<span class="tag">inactive</span>{% endif %}<br>
+  <span class="muted">Courses: {% for c in l.taught_courses.all %}{{ c.code }}{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}</span>
+</div>
+{% empty %}<p>No lecturers yet.</p>{% endfor %}
+<p class="muted">Assign a lecturer to a course from the course's edit page.</p>
+{% endblock %}

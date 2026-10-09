@@ -17,7 +17,7 @@ availability window + attempt state.
 from django.utils import timezone
 
 from . import rules
-from .roles import ADMIN, LECTURER, STUDENT, has_role, primary_role
+from .roles import ADMIN, LECTURER, STUDENT, has_role, holds_role, primary_role
 
 
 # --- Role-gated pages (no object involved) --------------------------------------
@@ -37,6 +37,27 @@ def can_access_lecturer_dashboard(user):
 
 def can_access_admin_dashboard(user):
     return has_role(user, ADMIN)
+
+
+# --- Administration console (departments, courses, lecturers, password resets) -----
+
+def can_manage_directory(user):
+    """The in-app console: only an application ADMIN. Not implied by is_staff / is_superuser."""
+    return has_role(user, ADMIN)
+
+
+def can_reset_password(actor, target):
+    """An ADMIN may issue a temporary password only to an ordinary student or lecturer account.
+
+    Never to themselves (they use the normal password-change page), and never to a superuser,
+    a staff member or another ADMIN: resetting a privileged account's password is a takeover of
+    that account, so those stay a deliberate, out-of-band operation.
+    """
+    if not has_role(actor, ADMIN) or target.pk == actor.pk:
+        return False
+    if target.is_superuser or target.is_staff or holds_role(target, ADMIN):
+        return False
+    return holds_role(target, STUDENT) or holds_role(target, LECTURER)
 
 
 # --- Object-level: student profiles ---------------------------------------------

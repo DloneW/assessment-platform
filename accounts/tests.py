@@ -16,8 +16,8 @@ STRONG_PASSWORD = "Tr0ub4dor&3-horse"
 class BaseTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.dept = Department.objects.create(name="Cybersecurity Science", code="CYB")
-        cls.dept2 = Department.objects.create(name="Computer Science", code="CSC")
+        cls.dept = Department.objects.create(name="Cybersecurity Science")
+        cls.dept2 = Department.objects.create(name="Computer Science")
         cls.level = Level.objects.create(number=200)
         cls.level2 = Level.objects.create(number=300)
 
@@ -273,7 +273,7 @@ class ModelTests(BaseTestCase):
                 student_id="CYB/2024/001", department=self.dept, level=self.level,
             )
         with self.assertRaises(IntegrityError), transaction.atomic():
-            Department.objects.create(name="Other", code="CYB")
+            Department.objects.create(name="CYBERSECURITY SCIENCE")
         Course.objects.create(code="CYB201", title="Intro", department=self.dept, level=self.level)
         with self.assertRaises(IntegrityError), transaction.atomic():
             Course.objects.create(code="CYB201", title="Dup", department=self.dept, level=self.level)

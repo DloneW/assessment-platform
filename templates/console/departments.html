@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Departments{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Departments</h1>
+{% for d in departments %}
+<div class="card">
+  <strong>{{ d.name }}</strong>
+  <span class="muted">{{ d.n_courses }} course(s), {{ d.n_students }} student(s)</span><br>
+  <a href="{% url 'accounts:console_department_edit' d.pk %}">Rename</a>
+  <form class="inline" method="post" action="{% url 'accounts:console_department_delete' d.pk %}"
+        onsubmit="return confirm('Delete this department?');">
+    {% csrf_token %}<button type="submit" class="danger">Delete</button>
+  </form>
+</div>
+{% empty %}<p>No departments yet.</p>{% endfor %}
+<h2>Add a department</h2>
+<form method="post" novalidate>
+  {% csrf_token %}{{ form.non_field_errors }}
+  <label for="{{ form.name.id_for_label }}">Name</label>
+  {{ form.name }}{{ form.name.errors }}
+  <button type="submit">Add department</button>
+</form>
+{% endblock %}

@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Reset password{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Reset password</h1>
+<p>Issue a new temporary password for <strong>{{ account.get_full_name|default:account.username }}</strong> ({{ account.username }})?
+They will be signed out everywhere and must choose their own password at next login.</p>
+<form method="post">{% csrf_token %}<button type="submit" class="danger">Reset password</button></form>
+<p><a href="{% url 'accounts:console_accounts' %}">Cancel</a></p>
+{% endblock %}

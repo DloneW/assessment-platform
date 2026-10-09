@@ -7,7 +7,7 @@ services:
     plan: free
     buildCommand: ./build.sh
     # Migrate, then serve. Gunicorn reads $PORT from Render.
-    startCommand: python manage.py migrate --noinput && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
+    startCommand: python manage.py migrate --noinput && (python manage.py create_app_admin || true) && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
     healthCheckPath: /login/
     envVars:
       - key: PYTHON_VERSION
@@ -22,8 +22,16 @@ services:
         fromDatabase:
           name: assessment-db
           property: connectionString
-      # First administrator, created at start if DJANGO_SUPERUSER_* are set and the username does not exist yet.
+      # First application ADMIN (the in-app console user; not staff, not superuser), created at start if these
+      # are set and the username does not exist yet. It must change this password at first login.
       # Render asks for these values when the Blueprint is applied; they are never stored in the repository.
+      - key: DJANGO_APP_ADMIN_USERNAME
+        sync: false
+      - key: DJANGO_APP_ADMIN_EMAIL
+        sync: false
+      - key: DJANGO_APP_ADMIN_PASSWORD
+        sync: false
+      # Optional: a Django superuser (Django admin site, emergencies only). Same rules as above.
       - key: DJANGO_SUPERUSER_USERNAME
         sync: false
       - key: DJANGO_SUPERUSER_EMAIL

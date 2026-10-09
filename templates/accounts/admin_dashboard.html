@@ -2,6 +2,7 @@
 {% block title %}Admin dashboard{% endblock %}
 {% block content %}
 <h1>Administration</h1>
+{% include "console/nav.html" %}
 <dl>
   <dt>Students</dt><dd>{{ counts.students }}</dd>
   <dt>Lecturers</dt><dd>{{ counts.lecturers }}</dd>

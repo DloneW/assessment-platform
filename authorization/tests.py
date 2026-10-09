@@ -45,7 +45,7 @@ def make_user(username, role=None, **extra):
 def make_student(username, department, level, courses=()):
     user = make_user(username, STUDENT)
     profile = StudentProfile.objects.create(
-        user=user, student_id=f"{department.code}/{username}", department=department, level=level
+        user=user, student_id=f"{department.name[:3].upper()}/{username}", department=department, level=level
     )
     for course in courses:
         Enrollment.objects.create(student=profile, course=course)
@@ -58,8 +58,8 @@ class AuthzTestCase(TestCase):
 
     @classmethod
     def setUpTestData(cls):
-        cls.cyb = Department.objects.create(name="Cybersecurity Science", code="CYB")
-        cls.csc = Department.objects.create(name="Computer Science", code="CSC")
+        cls.cyb = Department.objects.create(name="Cybersecurity Science")
+        cls.csc = Department.objects.create(name="Computer Science")
         cls.l200 = Level.objects.create(number=200)
         cls.l300 = Level.objects.create(number=300)
 
