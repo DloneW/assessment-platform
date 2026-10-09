@@ -7,7 +7,7 @@ services:
     plan: free
     buildCommand: ./build.sh
     # Migrate, then serve. Gunicorn reads $PORT from Render.
-    startCommand: python manage.py migrate --noinput && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
+    startCommand: python manage.py migrate --noinput && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
     healthCheckPath: /login/
     envVars:
       - key: PYTHON_VERSION
@@ -22,6 +22,14 @@ services:
         fromDatabase:
           name: assessment-db
           property: connectionString
+      # First administrator, created at start if DJANGO_SUPERUSER_* are set and the username does not exist yet.
+      # Render asks for these values when the Blueprint is applied; they are never stored in the repository.
+      - key: DJANGO_SUPERUSER_USERNAME
+        sync: false
+      - key: DJANGO_SUPERUSER_EMAIL
+        sync: false
+      - key: DJANGO_SUPERUSER_PASSWORD
+        sync: false
       # RENDER_EXTERNAL_HOSTNAME (set by Render) is added to ALLOWED_HOSTS and CSRF_TRUSTED_ORIGINS automatically.
       # For a custom domain also set DJANGO_ALLOWED_HOSTS and DJANGO_CSRF_TRUSTED_ORIGINS.
 
