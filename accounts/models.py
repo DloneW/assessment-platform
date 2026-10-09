@@ -101,7 +101,7 @@ class StudentProfile(models.Model):
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile"
     )
-    student_id = models.CharField(max_length=30)
+    student_id = models.CharField("matric number", max_length=30)
     department = models.ForeignKey(Department, on_delete=models.PROTECT, related_name="students")
     level = models.ForeignKey(Level, on_delete=models.PROTECT, related_name="students")
     # Courses the student is enrolled in, via the explicit Enrollment model below.

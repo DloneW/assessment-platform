@@ -122,7 +122,7 @@ Roles can also be changed in the Django admin (Users -> Groups), but only by sup
 
 ### Known limitations
 
-- **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
+- **Self-asserted identity.** A student chooses their own matric number, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
 - **No login throttling.** Repeated password guesses are not rate-limited.
 - **Production flags** (HTTPS-only cookies, HSTS, SSL redirect) are configured for `DEBUG=False`; see "Deployment".
 
@@ -156,7 +156,7 @@ Student:   eligible published test -> Start attempt -> Answer (save) -> Submit -
 
 ### Known limitations
 
-- **Self-asserted identity.** A student chooses their own student ID, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
+- **Self-asserted identity.** A student chooses their own matric number, department and level at registration, and these are not verified. Enrollment (made by staff) is the second gate for course access; if self-enrollment is ever added, these attributes need verification first.
 - **No login throttling.** Repeated password guesses are not rate-limited.
 - **Production flags** are configured for `DEBUG=False`; see "Deployment".
 - **Lazy expiry.** No background job: an overdue attempt becomes EXPIRED the next time it or its student's dashboard is opened. Nothing can be written to it meanwhile.
@@ -186,7 +186,7 @@ This section describes what the application enforces and how it was tested. It i
 
 **CSRF and XSS.** CSRF middleware is on and every state-changing route was tested to return 403 without a token. Templates rely on Django autoescaping; a test scans for `|safe`, `autoescape off` and `mark_safe`, and script/attribute payloads in registration, course, test, question and choice fields are verified as escaped on every page that shows them. All queries use the ORM (a test scans for raw SQL). Authenticated responses are sent `Cache-Control: no-store` so results and the answer key are not recoverable from the browser cache after logout.
 
-**Database constraints.** Case-insensitive unique username, email and student ID; unique enrollment; unique attempt per student/test; unique answer per attempt/question; one correct choice per question; unique question/choice order; non-blank titles and texts; positive marks and orders; duration bounds; attempt state, score, and timestamp consistency (a SUBMITTED attempt is submitted after it started and before its deadline).
+**Database constraints.** Case-insensitive unique username, email and matric number; unique enrollment; unique attempt per student/test; unique answer per attempt/question; one correct choice per question; unique question/choice order; non-blank titles and texts; positive marks and orders; duration bounds; attempt state, score, and timestamp consistency (a SUBMITTED attempt is submitted after it started and before its deadline).
 
 **Security testing.** `assessments/test_security.py` attacks the application with HTTP requests (IDOR and privilege escalation in both directions, every edge of both state machines, forged protected fields, answer/score/time tampering, malformed and oversized input, CSRF, XSS, admin-site bypass, constraint violations), alongside `authorization/test_boundary.py` and the Day 2/3 suites. Key guards were also checked by mutation: removing each made at least one test fail.
 
@@ -204,8 +204,8 @@ This section describes what the application enforces and how it was tested. It i
 
 - **No question snapshot.** Scores are computed from the live question/choice rows at finalization. The application and admin freeze published tests, so this cannot be changed through them, but direct database/shell edits to a published test could alter the scoring of attempts still in progress. A finalized attempt keeps its stored score.
 - **Attempt rights follow ownership.** A student already in an attempt may finish it if later unenrolled or if the test is archived; new starts are refused.
-- **No login or registration throttling**, no account lockout, no MFA, no email verification. Registration reveals whether a username, email or student ID is taken.
-- **Self-asserted identity** (student ID, department, level) is not verified; enrollment by staff is the second gate.
+- **No login or registration throttling**, no account lockout, no MFA, no email verification. Registration reveals whether a username, email or matric number is taken.
+- **Self-asserted identity** (matric number, department, level) is not verified; enrollment by staff is the second gate.
 - **Staff with Django-admin permissions are trusted** for the data those permissions cover (for example enrollments and lecturer assignments).
 - **Lazy expiry**, no background job; no audit log; no password-reset flow.
 - **Hosted deployment not yet verified.** The production configuration exists and was tested locally, but real TLS, the hosting platform's proxy and its managed database have not been exercised (see "Deployment").

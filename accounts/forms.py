@@ -1,3 +1,4 @@
+import re
 import unicodedata
 
 from django import forms
@@ -10,6 +11,8 @@ from authorization.roles import STUDENT, assign_role
 
 from .models import Department, Level, StudentProfile
 
+_MATRIC_RE = re.compile(r"[A-Z0-9][A-Z0-9/._-]{2,29}")
+
 User = get_user_model()
 
 
@@ -21,7 +24,14 @@ class StudentRegistrationForm(forms.ModelForm):
     save() never sets them, so registrants are always plain students.
     """
 
-    student_id = forms.CharField(max_length=30, label="Student ID")
+    # The student's own matric number. Formats differ between students and departments, so no
+    # single pattern is enforced; only a safe character set, case-insensitive uniqueness and
+    # normalisation (stored upper-case, no spaces) are.
+    student_id = forms.CharField(
+        max_length=30,
+        label="Matric number",
+        help_text="Your own matric number, exactly as on your school ID (letters, digits, / - . _).",
+    )
     department = forms.ModelChoiceField(queryset=Department.objects.all(), empty_label="Select department")
     level = forms.ModelChoiceField(queryset=Level.objects.all(), empty_label="Select level")
     password1 = forms.CharField(label="Password", strip=False, widget=forms.PasswordInput)
@@ -51,11 +61,15 @@ class StudentRegistrationForm(forms.ModelForm):
         return email
 
     def clean_student_id(self):
-        student_id = self.cleaned_data["student_id"].strip()
+        student_id = unicodedata.normalize("NFKC", self.cleaned_data["student_id"]).strip().upper()
         if not student_id:
             raise ValidationError("This field is required.")
+        if not _MATRIC_RE.fullmatch(student_id):
+            raise ValidationError(
+                "Enter your matric number using only letters, digits and / - . _ (3 to 30 characters, no spaces)."
+            )
         if StudentProfile.objects.filter(student_id__iexact=student_id).exists():
-            raise ValidationError("A student with this ID already exists.")
+            raise ValidationError("A student with this matric number already exists.")
         return student_id
 
     def clean(self):

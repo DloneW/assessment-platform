@@ -201,6 +201,37 @@ class DashboardTests(BaseTestCase):
         self.assertNotContains(response, "CSC/2023/777")
 
 
+class MatricNumberTests(BaseTestCase):
+    def post(self, matric, username):
+        data = self.registration_data(username=username, email=f"{username}@example.com", student_id=matric)
+        return self.client.post(reverse("accounts:register"), data)
+
+    def test_each_student_registers_with_their_own_different_matric_number(self):
+        for i, matric in enumerate(["AATU/CYS/22/0001", "19-0345", "CSC.2021.77", "ABC_12/3"]):
+            response = self.post(matric, f"stud{i}")
+            self.assertRedirects(response, reverse("accounts:login"), fetch_redirect_response=False)
+        self.assertEqual(
+            sorted(StudentProfile.objects.filter(user__username__startswith="stud").values_list("student_id", flat=True)),
+            ["19-0345", "AATU/CYS/22/0001", "ABC_12/3", "CSC.2021.77"],
+        )
+
+    def test_matric_number_is_stored_upper_case_and_duplicates_ignore_case(self):
+        self.post("  aatu/cys/22/0001 ", "one")
+        self.assertTrue(StudentProfile.objects.filter(student_id="AATU/CYS/22/0001").exists())
+        response = self.post("Aatu/Cys/22/0001", "two")
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(get_user_model().objects.filter(username="two").exists())
+
+    def test_unsafe_or_malformed_matric_numbers_are_rejected(self):
+        for bad in ["AB", "AATU 22 001", "CYB/<b>x</b>", "'; DROP TABLE--", "/22/001", "X" * 31]:
+            response = self.post(bad, "bad")
+            self.assertEqual(response.status_code, 200, bad)
+            self.assertFalse(get_user_model().objects.filter(username="bad").exists(), bad)
+
+    def test_registration_page_asks_for_matric_number(self):
+        self.assertContains(self.client.get(reverse("accounts:register")), "Matric number")
+
+
 class AdminLoginLandingTests(BaseTestCase):
     """A createsuperuser account holds no application role; logging in must not dead-end at a 403."""
 

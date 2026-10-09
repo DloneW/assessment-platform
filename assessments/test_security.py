@@ -619,10 +619,13 @@ class InputSecurityTests(AssessmentTestCase):
         c = Client()
         c.post(reverse("accounts:register"), {
             "first_name": XSS, "last_name": XSS_ATTR, "username": "xss1", "email": "xss1@example.com",
-            "student_id": "CYB/<b>x</b>", "department": self.cyb.pk, "level": self.l200.pk,
+            "student_id": "CYB/22/0099", "department": self.cyb.pk, "level": self.l200.pk,
             "password1": PASSWORD, "password2": PASSWORD,
         })
         user = User.objects.get(username="xss1")
+        # Registration now rejects markup in the matric number, but an admin could still store one:
+        # the templates must escape it regardless.
+        StudentProfile.objects.filter(user=user).update(student_id="CYB/<b>x</b>")
         Enrollment.objects.create(student=user.student_profile, course=self.cyb201)
         c.force_login(user)
         for url in (self.student_dashboard(), self.profile_url(user)):
