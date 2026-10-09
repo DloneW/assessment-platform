@@ -37,7 +37,13 @@ class RoleAwareLoginView(LoginView):
     http_method_names = ["get", "head", "post", "options"]  # Django's FormView would also accept PUT
 
     def get_default_redirect_url(self):
-        return reverse(LANDING_URL_NAMES.get(primary_role(self.request.user), "accounts:dashboard"))
+        user = self.request.user
+        role = primary_role(user)
+        if role is None and user.is_staff:
+            # A createsuperuser account has no application role; its home is the Django admin
+            # (which enforces its own permissions), not a dashboard that would answer 403.
+            return reverse("admin:index")
+        return reverse(LANDING_URL_NAMES.get(role, "accounts:dashboard"))
 
 
 @require_http_methods(["GET", "HEAD", "POST"])

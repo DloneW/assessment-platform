@@ -201,6 +201,30 @@ class DashboardTests(BaseTestCase):
         self.assertNotContains(response, "CSC/2023/777")
 
 
+class AdminLoginLandingTests(BaseTestCase):
+    """A createsuperuser account holds no application role; logging in must not dead-end at a 403."""
+
+    def test_roleless_superuser_lands_on_admin(self):
+        User = get_user_model()
+        User.objects.create_superuser("boss", "boss@example.com", "Zq9!longpass-test")
+        response = self.client.post(reverse("accounts:login"), {"username": "boss", "password": "Zq9!longpass-test"})
+        self.assertRedirects(response, reverse("admin:index"), fetch_redirect_response=False)
+        self.assertEqual(self.client.get(reverse("admin:index")).status_code, 200)
+
+    def test_roleless_non_staff_still_gets_403_on_dashboard(self):
+        User = get_user_model()
+        User.objects.create_user("nobody", "nobody@example.com", "Zq9!longpass-test")
+        self.client.login(username="nobody", password="Zq9!longpass-test")
+        self.assertEqual(self.client.get(reverse("accounts:dashboard")).status_code, 403)
+
+    def test_roleless_superuser_visiting_login_is_sent_to_admin(self):
+        User = get_user_model()
+        User.objects.create_superuser("boss", "boss@example.com", "Zq9!longpass-test")
+        self.client.login(username="boss", password="Zq9!longpass-test")
+        response = self.client.get(reverse("accounts:login"))
+        self.assertRedirects(response, reverse("admin:index"), fetch_redirect_response=False)
+
+
 class ModelTests(BaseTestCase):
     def test_13_student_profile_user_relationship(self):
         user = self.make_student()
