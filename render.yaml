@@ -7,9 +7,12 @@ services:
     plan: free
     buildCommand: ./build.sh
     # Migrate, then serve. Gunicorn reads $PORT from Render.
-    startCommand: python manage.py migrate --noinput && (python manage.py create_app_admin || true) && (python manage.py createsuperuser --noinput || true) && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
+    startCommand: python manage.py migrate --noinput && (python manage.py create_app_admin || true) && (python manage.py createsuperuser --noinput || true) && ([ "$LOAD_SAMPLE_TEST" != "1" ] || python manage.py load_sample_test --publish || true) && gunicorn config.wsgi:application --workers 2 --access-logfile - --error-logfile -
     healthCheckPath: /login/
     envVars:
+      # Set to 1 once to load the sample cybersecurity test into the course (idempotent), then remove it.
+      - key: LOAD_SAMPLE_TEST
+        sync: false
       - key: PYTHON_VERSION
         value: 3.13.5
       - key: DJANGO_DEBUG

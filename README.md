@@ -149,6 +149,33 @@ Roles can also be changed in the Django admin (Users -> Groups), but only by sup
 - **No login throttling.** Repeated password guesses are not rate-limited.
 - **Production flags** (HTTPS-only cookies, HSTS, SSL redirect) are configured for `DEBUG=False`; see "Deployment".
 
+## Question types, uploads and marking
+
+Each question is one of three kinds, chosen by the lecturer:
+
+- **Multiple choice**: marked automatically from the answer key (unchanged).
+- **Short answer**: the student types up to 2000 characters; a lecturer marks it.
+- **File upload**: the student uploads one image (PNG, JPEG, GIF, WebP) or document (PDF, Word `.docx`); a lecturer marks it.
+
+Short-answer and file questions carry an optional lecturer-only **marking guide** (never sent to students). A student's score counts multiple choice immediately and the other questions as 0 until marked; the result page says how many answers are still waiting. After a test is finished, the lecturer opens **Submissions and marking** on the test page, awards 0 to the question's marks with optional feedback, and the score is recomputed on the server. Only the course's lecturers (or an ADMIN) can mark; students never see marks of other students.
+
+Upload handling: files are checked from their **bytes** (magic numbers), not the name or the browser's content type; the extension must match; at most 2 MB each (and 10 MB per request); SVG, HTML, macro-enabled Word files and everything else are refused. Files are stored **in the database** (small files only) and served only as downloads (`attachment`, `nosniff`, sandboxed CSP) to the student who uploaded it and the course's lecturers.
+
+Load the sample test (60 marks: 8 multiple choice, 4 short answer, 2 file upload) into the course titled "Introduction to Cybersecurity and Strategy":
+
+    python manage.py load_sample_test            # saved as a draft
+    python manage.py load_sample_test --publish  # also publish it
+    python manage.py load_sample_test --course-code CYB101 --lecturer jdoe
+
+It is idempotent. On Render's free plan there is no shell, so set the environment variable `LOAD_SAMPLE_TEST=1` and redeploy; the start command runs it once (safe to leave, then remove).
+
+### Known limitations (question types)
+
+- Uploaded files are **not scanned for malware**. Validation reduces risk (type allow-list, no scriptable formats, forced download) but does not remove it; lecturers should open downloads with normal care.
+- Files live in the database, so they count against its size; Render's free database expires after its trial period and the data goes with it.
+- `.docx` validation checks structure, not whether the document is harmless; legacy `.doc` and other formats are not accepted.
+- Marking is by hand only; there is no plagiarism check or auto-grading of short answers.
+
 ## Assessment engine (Day 3)
 
 **Lifecycle.**

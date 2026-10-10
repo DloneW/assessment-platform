@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Submissions{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>Submissions: {{ test.title }}</h1>
+<table>
+  <tr><th>Matric number</th><th>Student</th><th>Status</th><th>Score</th><th>Marking</th><th></th></tr>
+  {% for row in rows %}
+  <tr>
+    <td>{{ row.attempt.student.student_id }}</td>
+    <td>{{ row.attempt.student.user.get_full_name|default:row.attempt.student.user.username }}</td>
+    <td>{{ row.attempt.get_status_display }}</td>
+    <td>{% if row.attempt.is_in_progress %}&ndash;{% else %}{{ row.attempt.score }} / {{ row.attempt.max_score }}{% endif %}</td>
+    <td>{% if row.attempt.is_in_progress %}in progress{% elif row.pending %}{{ row.pending }} to mark{% else %}done{% endif %}</td>
+    <td>{% if not row.attempt.is_in_progress %}<a href="{% url 'assessments:grade' test.pk row.attempt.pk %}">Mark</a>{% endif %}</td>
+  </tr>
+  {% empty %}
+  <tr><td colspan="6">No one has started this test yet.</td></tr>
+  {% endfor %}
+</table>
+<p><a href="{% url 'assessments:test_manage' test.pk %}">Back to test</a></p>
+{% endblock %}

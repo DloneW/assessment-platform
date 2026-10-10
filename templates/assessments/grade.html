@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Mark attempt{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>Marking: {{ attempt.student.student_id }}</h1>
+<p class="muted">{{ test.title }} &middot; score {{ attempt.score }} / {{ attempt.max_score }} &middot; {{ attempt.get_status_display }}</p>
+<form method="post">
+  {% csrf_token %}
+  {% for row in rows %}
+  <div class="card">
+    <strong>{{ row.question.get_kind_display }}</strong> <span class="tag">{{ row.question.marks }} mark{{ row.question.marks|pluralize }}</span>
+    <p>{{ row.question.text|linebreaksbr }}</p>
+    {% if row.question.marking_guide %}<p class="muted"><strong>Marking guide:</strong> {{ row.question.marking_guide|linebreaksbr }}</p>{% endif %}
+    {% if row.answer %}
+      {% if row.answer.text %}<blockquote>{{ row.answer.text|linebreaksbr }}</blockquote>{% endif %}
+      {% if row.answer.file %}<p>File: <a href="{% url 'assessments:answer_file' attempt.test_id attempt.pk row.answer.pk %}">{{ row.answer.file.filename }}</a> ({{ row.answer.file.content_type }}, {{ row.answer.file.size }} bytes)</p>{% endif %}
+      <label>Marks (0 to {{ row.question.marks }})
+        <input type="number" name="marks_{{ row.answer.pk }}" min="0" max="{{ row.question.marks }}" value="{{ row.answer.awarded_marks|default_if_none:'' }}">
+      </label>
+      <label>Feedback
+        <textarea name="feedback_{{ row.answer.pk }}" rows="2" maxlength="1000">{{ row.answer.feedback }}</textarea>
+      </label>
+    {% else %}
+      <p><em>The student left this unanswered (0 marks).</em></p>
+    {% endif %}
+  </div>
+  {% empty %}
+  <p>This test has no hand-marked questions.</p>
+  {% endfor %}
+  <button type="submit">Save marks</button>
+</form>
+<p><a href="{% url 'assessments:submissions' test.pk %}">Back to submissions</a></p>
+{% endblock %}

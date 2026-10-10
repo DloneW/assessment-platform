@@ -175,6 +175,17 @@ def can_submit_attempt(user, attempt):
     return can_view_attempt(user, attempt) and rules.attempt_is_in_progress(attempt)
 
 
+def can_grade_attempt(user, attempt):
+    """A manager of the attempt's course may mark it, but only once it is finished (SUBMITTED or
+    EXPIRED), so marks never race with a student still answering."""
+    return can_manage_course(user, attempt.test.course) and not rules.attempt_is_in_progress(attempt)
+
+
+def can_download_answer_file(user, attempt):
+    """The student who uploaded it, or a manager of the course the test belongs to."""
+    return can_view_attempt(user, attempt) or can_manage_course(user, attempt.test.course)
+
+
 # --- Querysets that mirror the decisions above (for listings) ---------------------------
 
 def courses_managed_by(user):

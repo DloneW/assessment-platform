@@ -6,16 +6,26 @@
 <h1>{{ attempt.test.title }}</h1>
 <p><strong>Time left: <span id="timer" data-remaining="{{ remaining_seconds }}">--:--</span></strong>
   <span class="muted">(display only; the server enforces the deadline)</span></p>
-<form id="attempt-form" method="post" action="{% url 'assessments:attempt_submit' attempt.test_id attempt.pk %}">
+<form id="attempt-form" method="post" enctype="multipart/form-data" action="{% url 'assessments:attempt_submit' attempt.test_id attempt.pk %}">
   {% csrf_token %}
   {% for question in questions %}
   <div class="card">
     <strong>{{ forloop.counter }}.</strong> {{ question.text|linebreaksbr }} <span class="tag">{{ question.marks }} mark{{ question.marks|pluralize }}</span>
+    {% if question.kind == "MCQ" %}
     <div class="radios">
       {% for choice in question.choices.all %}
       <label><input type="radio" name="q_{{ question.pk }}" value="{{ choice.pk }}"{% if selected|get_item:question.pk == choice.pk %} checked{% endif %}> {{ choice.text }}</label>
       {% endfor %}
     </div>
+    {% elif question.kind == "SHORT" %}
+    <textarea name="t_{{ question.pk }}" rows="5" maxlength="2000" placeholder="Type your answer">{{ texts|get_item:question.pk|default:"" }}</textarea>
+    {% else %}
+    {% with current=files|get_item:question.pk %}
+    {% if current %}<p>Uploaded: <strong>{{ current.filename }}</strong> ({{ current.size }} bytes). Choose another file to replace it.</p>{% endif %}
+    {% endwith %}
+    <input type="file" name="f_{{ question.pk }}">
+    <p class="muted">{{ allowed_types }}. Up to {{ max_upload_mb }} MB. The file uploads when you press Save progress or Submit.</p>
+    {% endif %}
   </div>
   {% endfor %}
   <button type="submit" id="submit-btn">Submit test</button>
@@ -39,6 +49,8 @@
   // Best-effort autosave on every change so answers reach the server before the deadline.
   form.addEventListener("change", function () {
     var data = new FormData(form);
+    // Files are sent only by Save progress / Submit, never by autosave.
+    Array.from(data.keys()).forEach(function (k) { if (k.indexOf("f_") === 0) { data.delete(k); } });
     data.append("ajax", "1");
     fetch(saveUrl, { method: "POST", body: data, credentials: "same-origin" });
   });

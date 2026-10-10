@@ -6,7 +6,7 @@ timestamp that the server sets: those come from the URL object and the session.
 from django import forms
 from django.utils import timezone
 
-from .models import MAX_DURATION_MINUTES
+from .models import MAX_DURATION_MINUTES, Question
 
 MAX_CHOICES = 5
 MIN_CHOICES = 2
@@ -55,10 +55,18 @@ class TestForm(forms.Form):
 
 
 class QuestionForm(forms.Form):
+    kind = forms.ChoiceField(choices=Question.Kind.choices, initial=Question.Kind.MCQ, label="Question type", required=False)
     text = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), max_length=2000)
     marks = forms.IntegerField(min_value=1, max_value=100, initial=1)
-    choice_1 = forms.CharField(max_length=500, label="Choice A")
-    choice_2 = forms.CharField(max_length=500, label="Choice B")
+    marking_guide = forms.CharField(
+        widget=forms.Textarea(attrs={"rows": 3}),
+        max_length=2000,
+        required=False,
+        label="Marking guide (lecturers only)",
+        help_text="Not multiple choice only. Shown to markers, never to students.",
+    )
+    choice_1 = forms.CharField(max_length=500, label="Choice A", required=False)
+    choice_2 = forms.CharField(max_length=500, label="Choice B", required=False)
     choice_3 = forms.CharField(max_length=500, label="Choice C", required=False)
     choice_4 = forms.CharField(max_length=500, label="Choice D", required=False)
     choice_5 = forms.CharField(max_length=500, label="Choice E", required=False)
@@ -66,6 +74,7 @@ class QuestionForm(forms.Form):
         choices=[(str(i), chr(64 + i)) for i in range(1, MAX_CHOICES + 1)],
         widget=forms.RadioSelect,
         label="Correct choice",
+        required=False,
     )
 
     def clean_text(self):
@@ -74,8 +83,17 @@ class QuestionForm(forms.Form):
             raise forms.ValidationError("Question text is required.")
         return text
 
+    def clean_marking_guide(self):
+        return self.cleaned_data["marking_guide"].strip()
+
     def clean(self):
         cleaned = super().clean()
+        cleaned["kind"] = cleaned.get("kind") or Question.Kind.MCQ
+        if cleaned["kind"] != Question.Kind.MCQ:
+            # Choices make no sense for these kinds; ignore anything submitted.
+            cleaned["choices"], cleaned["correct"] = [], None
+            return cleaned
+        cleaned["marking_guide"] = ""
         texts = []  # (position, text) for non-blank choices, positions kept so the key matches the letter
         for position in range(1, MAX_CHOICES + 1):
             value = (cleaned.get(f"choice_{position}") or "").strip()
@@ -87,20 +105,26 @@ class QuestionForm(forms.Form):
         if len(set(lowered)) != len(lowered):
             raise forms.ValidationError("Choices must all be different.")
         correct = cleaned.get("correct")
-        if correct:
+        if not correct:
+            self.add_error("correct", "Select the correct choice.")
+        else:
             positions = [p for p, _ in texts]
             if int(correct) not in positions:
                 self.add_error("correct", "The correct choice must be one of the choices you filled in.")
             else:
                 # Re-number contiguously; the correct index follows its text.
-                new_correct = positions.index(int(correct)) + 1
                 cleaned["choices"] = [t for _, t in texts]
-                cleaned["correct"] = new_correct
+                cleaned["correct"] = positions.index(int(correct)) + 1
         return cleaned
 
     @classmethod
     def from_question(cls, question):
-        initial = {"text": question.text, "marks": question.marks}
+        initial = {
+            "kind": question.kind,
+            "text": question.text,
+            "marks": question.marks,
+            "marking_guide": question.marking_guide,
+        }
         for choice in question.choices.all():
             initial[f"choice_{choice.order}"] = choice.text
             if choice.is_correct:

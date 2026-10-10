@@ -2,7 +2,7 @@
 {% block title %}{% if question %}Edit question{% else %}Add question{% endif %}{% endblock %}
 {% block content %}
 <h1>{% if question %}Edit question{% else %}Add question{% endif %}</h1>
-<p class="muted">{{ test.title }}. Fill at least two choices and mark exactly one as correct.</p>
+<p class="muted">{{ test.title }}. Multiple choice needs at least two choices and exactly one correct. Short-answer and file-upload questions are marked by hand; leave the choices empty.</p>
 <form method="post" novalidate>
   {% csrf_token %}
   {{ form.as_p }}

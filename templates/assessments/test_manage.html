@@ -29,15 +29,21 @@
 </div>
 {% endif %}
 
+{% if not test.is_draft %}<p><a href="{% url 'assessments:submissions' test.pk %}">Submissions and marking</a></p>{% endif %}
 <h2>Questions ({{ questions|length }})</h2>
 {% for question in questions %}
 <div class="card">
   <strong>{{ forloop.counter }}.</strong> {{ question.text|linebreaksbr }} <span class="tag">{{ question.marks }} mark{{ question.marks|pluralize }}</span>
+  <span class="tag">{{ question.get_kind_display }}</span>
+  {% if question.is_mcq %}
   <ol type="A">
     {% for choice in question.choices.all %}
     <li>{{ choice.text }}{% if choice.is_correct %} <strong>&#10003; correct</strong>{% endif %}</li>
     {% endfor %}
   </ol>
+  {% elif question.marking_guide %}
+  <p class="muted"><strong>Marking guide:</strong> {{ question.marking_guide|linebreaksbr }}</p>
+  {% endif %}
   {% if can_edit %}
   <a href="{% url 'assessments:question_edit' test.pk question.pk %}">Edit</a>
   <form class="inline" method="post" action="{% url 'assessments:question_delete' test.pk question.pk %}">{% csrf_token %}<button type="submit" class="danger">Delete</button></form>

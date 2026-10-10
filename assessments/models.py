@@ -18,6 +18,9 @@ from django.db.models import F, Q
 from django.utils import timezone
 
 MAX_DURATION_MINUTES = 600
+MAX_SHORT_ANSWER_CHARS = 2000
+MAX_FEEDBACK_CHARS = 1000
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024  # 2 MB; files are stored in the database
 
 
 class Test(models.Model):
@@ -88,10 +91,19 @@ class Test(models.Model):
 
 
 class Question(models.Model):
+    class Kind(models.TextChoices):
+        MCQ = "MCQ", "Multiple choice"  # auto-scored from the answer key
+        SHORT = "SHORT", "Short answer"  # typed text, marked by a lecturer
+        FILE = "FILE", "File upload"  # an image or document, marked by a lecturer
+
     test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="questions")
+    kind = models.CharField(max_length=5, choices=Kind.choices, default=Kind.MCQ)
     text = models.TextField()
     order = models.PositiveSmallIntegerField()
     marks = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
+    # Lecturer-only notes for marking SHORT/FILE questions. Server-side data like the answer key:
+    # student-facing code must never load or render it (it is deferred in every student query).
+    marking_guide = models.TextField(blank=True)
 
     class Meta:
         ordering = ["order"]
@@ -100,10 +112,19 @@ class Question(models.Model):
             models.CheckConstraint(condition=Q(marks__gte=1), name="assessments_question_marks_positive"),
             models.CheckConstraint(condition=~Q(text=""), name="assessments_question_text_not_blank"),
             models.CheckConstraint(condition=Q(order__gte=1), name="assessments_question_order_positive"),
+            models.CheckConstraint(condition=Q(kind__in=["MCQ", "SHORT", "FILE"]), name="assessments_question_kind_valid"),
         ]
 
     def __str__(self):
         return f"Q{self.order}: {self.text[:40]}"
+
+    @property
+    def is_mcq(self):
+        return self.kind == self.Kind.MCQ
+
+    @property
+    def needs_manual_grading(self):
+        return self.kind != self.Kind.MCQ
 
 
 class Choice(models.Model):
@@ -194,31 +215,96 @@ class Attempt(models.Model):
 
 
 class StudentAnswer(models.Model):
-    """A student's selected choice for one question in one attempt (at most one per question)."""
+    """A student's answer to one question in one attempt (at most one per question).
+
+    MCQ: `choice` is set. SHORT: `text` is set. FILE: an `AnswerFile` row is attached.
+    SHORT and FILE answers are marked by a lecturer: `awarded_marks`, `feedback`, `graded_by` and
+    `graded_at` are set together by the grading workflow and never by the student.
+    """
 
     attempt = models.ForeignKey(Attempt, on_delete=models.CASCADE, related_name="answers")
     question = models.ForeignKey(Question, on_delete=models.PROTECT, related_name="answers")
-    choice = models.ForeignKey(Choice, on_delete=models.PROTECT, related_name="answers")
+    choice = models.ForeignKey(Choice, on_delete=models.PROTECT, related_name="answers", null=True, blank=True)
+    text = models.TextField(blank=True)
     answered_at = models.DateTimeField(auto_now=True)
+    awarded_marks = models.PositiveSmallIntegerField(null=True, blank=True, editable=False)
+    feedback = models.TextField(blank=True, editable=False)
+    graded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", editable=False
+    )
+    graded_at = models.DateTimeField(null=True, blank=True, editable=False)
 
     class Meta:
         constraints = [
             models.UniqueConstraint(fields=["attempt", "question"], name="assessments_answer_one_per_attempt_question"),
+            # A mark and its grading time exist together.
+            models.CheckConstraint(
+                condition=Q(awarded_marks__isnull=True, graded_at__isnull=True)
+                | Q(awarded_marks__isnull=False, graded_at__isnull=False),
+                name="assessments_answer_grade_consistent",
+            ),
+            models.CheckConstraint(
+                condition=Q(text="") | Q(choice__isnull=True), name="assessments_answer_choice_xor_text"
+            ),
         ]
 
     def __str__(self):
-        return f"attempt {self.attempt_id}, question {self.question_id} -> choice {self.choice_id}"
+        return f"attempt {self.attempt_id}, question {self.question_id}"
 
-    def check_integrity(self):
-        """Rules that span tables and so cannot be plain SQL constraints."""
+    GRADING_FIELDS = frozenset({"awarded_marks", "feedback", "graded_by", "graded_at"})
+
+    def check_integrity(self, *, grading=False):
+        """Rules that span tables and so cannot be plain SQL constraints.
+
+        `grading=True` is a save that touches only the grading fields (after the attempt has been
+        finalized): the answer's content is still frozen, but marking it must be possible.
+        """
         if self.question.test_id != self.attempt.test_id:
             raise ValidationError("The question does not belong to the attempt's test.")
-        if self.choice.question_id != self.question_id:
-            raise ValidationError("The choice does not belong to the question.")
+        if self.question.is_mcq:
+            if self.choice_id is None or self.choice.question_id != self.question_id:
+                raise ValidationError("The choice does not belong to the question.")
+            if self.text:
+                raise ValidationError("A multiple-choice answer has no text.")
+        else:
+            if self.choice_id is not None:
+                raise ValidationError("Only multiple-choice questions take a choice.")
+            if len(self.text) > MAX_SHORT_ANSWER_CHARS:
+                raise ValidationError("The answer is too long.")
+        if self.awarded_marks is not None and self.awarded_marks > self.question.marks:
+            raise ValidationError("Awarded marks cannot exceed the question's marks.")
         # Ask the database, not the in-memory object: a stale instance must not keep a closed attempt writable.
-        if not Attempt.objects.filter(pk=self.attempt_id, status=Attempt.Status.IN_PROGRESS).exists():
+        # (Grading happens after the attempt is finalized, so it is exempt: only the answer content is frozen.)
+        if not grading and not Attempt.objects.filter(pk=self.attempt_id, status=Attempt.Status.IN_PROGRESS).exists():
             raise ValidationError("The attempt is no longer in progress.")
 
     def save(self, *args, **kwargs):
-        self.check_integrity()
+        update_fields = kwargs.get("update_fields")
+        grading = update_fields is not None and set(update_fields) <= self.GRADING_FIELDS
+        self.check_integrity(grading=grading)
         super().save(*args, **kwargs)
+
+
+class AnswerFile(models.Model):
+    """The file a student uploaded for a FILE question, stored in the database (small files only).
+
+    One per answer. `content_type` and the extension come from the server's own sniffing of the
+    bytes (see assessments.uploads), never from what the browser claimed.
+    """
+
+    answer = models.OneToOneField(StudentAnswer, on_delete=models.CASCADE, related_name="file")
+    filename = models.CharField(max_length=100)
+    content_type = models.CharField(max_length=100)
+    size = models.PositiveIntegerField()
+    content = models.BinaryField()
+    uploaded_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=Q(size__gte=1, size__lte=MAX_UPLOAD_BYTES), name="assessments_answerfile_size_valid"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.filename} ({self.size} bytes)"

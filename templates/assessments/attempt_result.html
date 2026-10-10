@@ -8,5 +8,25 @@
   <dt>Started</dt><dd>{{ attempt.started_at }}</dd>
   {% if attempt.submitted_at %}<dt>Submitted</dt><dd>{{ attempt.submitted_at }}</dd>{% else %}<dt>Closed by the clock at</dt><dd>{{ attempt.deadline }}</dd>{% endif %}
 </dl>
+{% if pending %}<p class="muted">{{ pending }} answer{{ pending|pluralize }} still waiting to be marked by your lecturer, so this score may go up.</p>{% endif %}
+<h2>Your answers</h2>
+{% for row in rows %}
+<div class="card">
+  <strong>{{ forloop.counter }}.</strong> {{ row.question.text|linebreaksbr }}
+  <span class="tag">{{ row.question.marks }} mark{{ row.question.marks|pluralize }}</span>
+  {% if row.question.kind == "MCQ" %}
+    <p>{% if row.answer %}{{ row.answer.choice.text }}{% else %}<em>Not answered</em>{% endif %}</p>
+  {% else %}
+    {% if row.answer and row.answer.text %}<p>{{ row.answer.text|linebreaksbr }}</p>{% endif %}
+    {% if row.answer and row.answer.file %}<p>File: <a href="{% url 'assessments:answer_file' attempt.test_id attempt.pk row.answer.pk %}">{{ row.answer.file.filename }}</a></p>{% endif %}
+    {% if not row.answer %}<p><em>Not answered</em></p>{% endif %}
+    {% if row.answer and row.answer.awarded_marks is not None %}
+      <p><strong>Marks: {{ row.answer.awarded_marks }} / {{ row.question.marks }}</strong></p>
+      {% if row.answer.feedback %}<p class="muted">Feedback: {{ row.answer.feedback|linebreaksbr }}</p>{% endif %}
+    {% elif row.answer %}<p class="muted">Waiting to be marked.</p>
+    {% endif %}
+  {% endif %}
+</div>
+{% endfor %}
 <p><a href="{% url 'accounts:student_dashboard' %}">Back to dashboard</a></p>
 {% endblock %}

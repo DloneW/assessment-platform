@@ -75,6 +75,9 @@ ASSESSMENT_ROUTE_POLICY = {
     "attempt_detail": ("GET", "can_view_attempt (owner) + attempt belongs to test in URL, else 404"),
     "attempt_save": ("POST", "can_view_attempt, can_answer_attempt"),
     "attempt_submit": ("POST", "can_view_attempt, can_submit_attempt"),
+    "submissions": ("GET", "can_manage_test, else 404"),
+    "grade": ("GET/POST", "can_manage_test + can_grade_attempt (finished attempts only), else 404"),
+    "answer_file": ("GET", "can_download_answer_file (owner or course manager) + file belongs to attempt, else 404"),
 }
 READ_ONLY_ROUTES = [name for name, policy in ROUTE_POLICY.items() if "GET/HEAD only" in policy]
 
@@ -145,6 +148,7 @@ class RouteInventoryTests(BoundaryTestCase):
             "test_create": [self.cyb201.pk], "test_manage": [1], "test_edit": [1], "question_add": [1],
             "question_edit": [1, 1], "question_delete": [1, 1], "test_publish": [1], "test_archive": [1],
             "test_intro": [1], "attempt_start": [1], "attempt_detail": [1, 1], "attempt_save": [1, 1], "attempt_submit": [1, 1],
+            "submissions": [1], "grade": [1, 1], "answer_file": [1, 1, 1],
         }
         self.client.logout()
         for name, (methods, _policy) in ASSESSMENT_ROUTE_POLICY.items():

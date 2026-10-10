@@ -22,12 +22,24 @@ from django.db import IntegrityError, transaction
 from django.db.models import Count, Q, Sum
 from django.utils import timezone
 
-from .models import MAX_DURATION_MINUTES, Attempt, Choice, Question, StudentAnswer, Test
+from . import uploads
+from .models import (
+    MAX_DURATION_MINUTES,
+    MAX_FEEDBACK_CHARS,
+    MAX_SHORT_ANSWER_CHARS,
+    AnswerFile,
+    Attempt,
+    Choice,
+    Question,
+    StudentAnswer,
+    Test,
+)
 
 MAX_SELECTIONS_PER_REQUEST = 500
 # ASCII digits only and a bounded length: int() would also accept '1_0', '+1', ' 1' and non-ASCII digits.
 _ANSWER_KEY = re.compile(r"q_([0-9]{1,18})")
 _ID_VALUE = re.compile(r"[0-9]{1,18}")
+_TEXT_KEY = re.compile(r"t_([0-9]{1,18})")
 
 
 class StateError(Exception):
@@ -83,15 +95,23 @@ def _write_choices(question, choices, correct_index):
 
 
 def create_question(test, cleaned):
-    """`cleaned` comes from QuestionForm: text, marks, choices (list of strings), correct (1-based)."""
+    """`cleaned` comes from QuestionForm: kind, text, marks, marking_guide and, for multiple choice,
+    choices (list of strings) and correct (1-based). Short-answer and file questions have no choices."""
+    kind = cleaned.get("kind", Question.Kind.MCQ)
     try:
         with transaction.atomic():
             locked = _locked_draft(test.pk)
             highest = max(locked.questions.values_list("order", flat=True), default=0)
             question = Question.objects.create(
-                test=locked, text=cleaned["text"], marks=cleaned["marks"], order=highest + 1
+                test=locked,
+                kind=kind,
+                text=cleaned["text"],
+                marks=cleaned["marks"],
+                marking_guide=cleaned.get("marking_guide", "") if kind != Question.Kind.MCQ else "",
+                order=highest + 1,
             )
-            _write_choices(question, cleaned["choices"], cleaned["correct"])
+            if kind == Question.Kind.MCQ:
+                _write_choices(question, cleaned["choices"], cleaned["correct"])
     except IntegrityError:
         raise StateError("Someone else changed this test at the same time. Please try again.") from None
     return question
@@ -101,12 +121,16 @@ def update_question(question, cleaned):
     with transaction.atomic():
         _locked_draft(question.test_id)
         question = Question.objects.get(pk=question.pk)
+        kind = cleaned.get("kind", Question.Kind.MCQ)
+        question.kind = kind
         question.text = cleaned["text"]
         question.marks = cleaned["marks"]
+        question.marking_guide = cleaned.get("marking_guide", "") if kind != Question.Kind.MCQ else ""
         question.save()
         # Drafts have no attempts, so no answers can reference these choices.
         question.choices.all().delete()
-        _write_choices(question, cleaned["choices"], cleaned["correct"])
+        if kind == Question.Kind.MCQ:
+            _write_choices(question, cleaned["choices"], cleaned["correct"])
     return question
 
 
@@ -134,10 +158,13 @@ def validate_publishable(test, now=None):
     if not questions:
         problems.append("Add at least one question.")
     for number, question in enumerate(questions, start=1):
-        if question.n_choices < 2:
-            problems.append(f"Question {number} needs at least two choices.")
-        if question.n_correct != 1:
-            problems.append(f"Question {number} must have exactly one correct choice.")
+        if question.kind == Question.Kind.MCQ:
+            if question.n_choices < 2:
+                problems.append(f"Question {number} needs at least two choices.")
+            if question.n_correct != 1:
+                problems.append(f"Question {number} must have exactly one correct choice.")
+        elif question.n_choices:
+            problems.append(f"Question {number} is not multiple choice, so it cannot have choices.")
         if question.marks < 1:
             problems.append(f"Question {number} must be worth at least 1 mark.")
     return problems
@@ -239,40 +266,112 @@ def parse_selections(post):
     return selections
 
 
-def record_answers(attempt, selections, now=None):
-    """Store the selected choices. All-or-nothing: one bad pair rejects the whole request.
+def parse_texts(post):
+    """Turn POST data `t_<question_id>=<text>` into {question_id: text} for short-answer questions.
+    Over-long or malformed answers raise InvalidAnswer (the form's maxlength stops honest users first)."""
+    texts = {}
+    for key, value in post.items():
+        if not key.startswith("t_"):
+            continue
+        key_match = _TEXT_KEY.fullmatch(key)
+        if key_match is None:
+            raise InvalidAnswer("Malformed answer.")
+        value = value.replace("\r\n", "\n")
+        if len(value) > MAX_SHORT_ANSWER_CHARS or "\x00" in value:
+            raise InvalidAnswer("Answer too long or invalid.")
+        texts[int(key_match.group(1))] = value.strip()
+    if len(texts) > MAX_SELECTIONS_PER_REQUEST:
+        raise InvalidAnswer("Too many answers.")
+    return texts
 
-    Chain: the attempt is re-read and must be in progress and before its deadline; every
-    question must belong to the attempt's test; every choice must belong to that question.
-    Student, score and timestamps are never inputs here.
+
+def _open_attempt(attempt, now):
+    """Re-read the attempt inside a transaction; it must be in progress and before its deadline."""
+    current = Attempt.objects.get(pk=attempt.pk)
+    if not current.is_in_progress:
+        raise StateError("This attempt is already finished.")
+    if current.is_past_deadline(now):
+        raise StateError("Time is up for this attempt.")
+    return current
+
+
+def record_answers(attempt, selections, texts=None, now=None):
+    """Store multiple-choice selections and short-answer texts. All-or-nothing: one bad entry
+    rejects the whole request.
+
+    Chain: the attempt is re-read and must be in progress and before its deadline; every question
+    must belong to the attempt's test and be of the matching kind; every choice must belong to
+    that question. Student, score, marks and timestamps are never inputs here.
     """
     now = now or timezone.now()
+    texts = texts or {}
     with transaction.atomic():
-        current = Attempt.objects.get(pk=attempt.pk)
-        if not current.is_in_progress:
-            raise StateError("This attempt is already finished.")
-        if current.is_past_deadline(now):
-            raise StateError("Time is up for this attempt.")
+        current = _open_attempt(attempt, now)
         for question_id, choice_id in selections.items():
             question = Question.objects.filter(pk=question_id, test_id=current.test_id).first()
             if question is None:
                 raise InvalidAnswer("Question does not belong to this test.")
+            if not question.is_mcq:
+                raise InvalidAnswer("This question does not take a choice.")
             choice = Choice.objects.defer("is_correct").filter(pk=choice_id, question_id=question.pk).first()
             if choice is None:
                 raise InvalidAnswer("Choice does not belong to this question.")
             StudentAnswer.objects.update_or_create(
-                attempt=current, question=question, defaults={"choice": choice}
+                attempt=current, question=question, defaults={"choice": choice, "text": ""}
             )
+        for question_id, text in texts.items():
+            question = Question.objects.defer("marking_guide").filter(pk=question_id, test_id=current.test_id).first()
+            if question is None:
+                raise InvalidAnswer("Question does not belong to this test.")
+            if question.kind != Question.Kind.SHORT:
+                raise InvalidAnswer("This question does not take typed text.")
+            if text:
+                StudentAnswer.objects.update_or_create(
+                    attempt=current, question=question, defaults={"choice": None, "text": text}
+                )
+            else:  # clearing the box removes the answer
+                StudentAnswer.objects.filter(attempt=current, question=question).delete()
+
+
+def save_file_answer(attempt, question_id, uploaded, now=None):
+    """Attach (or replace) the student's uploaded file for a FILE question.
+
+    The file is validated from its bytes (assessments.uploads) before anything is written; the
+    attempt must be in progress and before its deadline, and the question must be a FILE question
+    of the attempt's test. Raises uploads.UploadRejected for an unacceptable file.
+    """
+    now = now or timezone.now()
+    filename, content_type, data = uploads.inspect_upload(uploaded)
+    with transaction.atomic():
+        current = _open_attempt(attempt, now)
+        question = Question.objects.defer("marking_guide").filter(pk=question_id, test_id=current.test_id).first()
+        if question is None:
+            raise InvalidAnswer("Question does not belong to this test.")
+        if question.kind != Question.Kind.FILE:
+            raise InvalidAnswer("This question does not take a file.")
+        answer, _ = StudentAnswer.objects.get_or_create(attempt=current, question=question, defaults={"text": ""})
+        AnswerFile.objects.update_or_create(
+            answer=answer,
+            defaults={"filename": filename, "content_type": content_type, "size": len(data), "content": data},
+        )
+    return answer
 
 
 def _score(attempt):
+    """(score, max_score) from stored answers: multiple choice by the answer key, short-answer and
+    file answers by the marks a lecturer has awarded so far (0 until marked)."""
     max_score = Question.objects.filter(test_id=attempt.test_id).aggregate(t=Sum("marks"))["t"] or 0
-    score = (
-        StudentAnswer.objects.filter(attempt=attempt, question__test_id=attempt.test_id, choice__is_correct=True)
-        .aggregate(t=Sum("question__marks"))["t"]
+    answers = StudentAnswer.objects.filter(attempt=attempt, question__test_id=attempt.test_id)
+    auto = (
+        answers.filter(question__kind=Question.Kind.MCQ, choice__is_correct=True).aggregate(t=Sum("question__marks"))["t"]
         or 0
     )
-    return score, max_score
+    manual = (
+        answers.exclude(question__kind=Question.Kind.MCQ).filter(awarded_marks__isnull=False)
+        .aggregate(t=Sum("awarded_marks"))["t"]
+        or 0
+    )
+    return auto + manual, max_score
 
 
 def _finalize(attempt_id, status, now):
@@ -312,3 +411,79 @@ def expire_overdue_for_student(student, now=None):
     now = now or timezone.now()
     for attempt in Attempt.objects.filter(student=student, status=Attempt.Status.IN_PROGRESS, deadline__lte=now):
         _finalize(attempt.pk, Attempt.Status.EXPIRED, now)
+
+
+def expire_overdue_for_test(test, now=None):
+    """Finalize every overdue in-progress attempt of a test, so a lecturer can mark them."""
+    now = now or timezone.now()
+    for attempt in Attempt.objects.filter(test=test, status=Attempt.Status.IN_PROGRESS, deadline__lte=now):
+        _finalize(attempt.pk, Attempt.Status.EXPIRED, now)
+
+
+# --- Marking short-answer and file answers ------------------------------------------------
+
+MANUAL_KINDS = (Question.Kind.SHORT, Question.Kind.FILE)
+
+
+def pending_grading_count(attempt):
+    """How many answers on short-answer / file questions still wait for a lecturer's mark."""
+    return StudentAnswer.objects.filter(
+        attempt=attempt, question__kind__in=MANUAL_KINDS, graded_at__isnull=True
+    ).count()
+
+
+def parse_grades(post, answers):
+    """Read `marks_<answer_id>` and `feedback_<answer_id>` for the given answers.
+
+    Returns {answer_id: (marks, feedback)} for answers whose marks box was filled. A blank marks box
+    means "not marked yet" and is left alone. Anything non-numeric raises InvalidAnswer.
+    """
+    grades = {}
+    for answer in answers:
+        raw = (post.get(f"marks_{answer.pk}") or "").strip()
+        if raw == "":
+            continue
+        if _ID_VALUE.fullmatch(raw) is None:
+            raise InvalidAnswer("Marks must be a whole number.")
+        feedback = (post.get(f"feedback_{answer.pk}") or "").replace("\r\n", "\n").strip()
+        grades[answer.pk] = (int(raw), feedback)
+    return grades
+
+
+def grade_attempt(attempt, grades, grader, now=None):
+    """Record a lecturer's marks and feedback, then recompute the attempt's score.
+
+    `grades` is {answer_id: (marks, feedback)}. The attempt must already be finalized (SUBMITTED or
+    EXPIRED); every answer must belong to it and be a short-answer or file answer; marks must be
+    between 0 and the question's marks. `grader` is the logged-in user, never a form value.
+    All-or-nothing. Re-marking is allowed (it overwrites and re-scores).
+    """
+    now = now or timezone.now()
+    with transaction.atomic():
+        current = Attempt.objects.select_for_update().get(pk=attempt.pk)
+        if current.is_in_progress:
+            raise StateError("This attempt is still in progress, so it cannot be marked yet.")
+        answers = {
+            a.pk: a
+            for a in StudentAnswer.objects.select_related("question")
+            .defer("question__marking_guide")
+            .filter(attempt=current, pk__in=list(grades))
+        }
+        for answer_id, (marks, feedback) in grades.items():
+            answer = answers.get(answer_id)
+            if answer is None or answer.question.is_mcq:
+                raise InvalidAnswer("That answer cannot be marked here.")
+            if not 0 <= marks <= answer.question.marks:
+                raise InvalidAnswer(f"Marks must be between 0 and {answer.question.marks}.")
+            if len(feedback) > MAX_FEEDBACK_CHARS or "\x00" in feedback:
+                raise InvalidAnswer("Feedback is too long or invalid.")
+            answer.awarded_marks = marks
+            answer.feedback = feedback
+            answer.graded_by = grader
+            answer.graded_at = now
+            answer.save(update_fields=["awarded_marks", "feedback", "graded_by", "graded_at"])
+        score, max_score = _score(current)
+        Attempt.objects.filter(pk=current.pk).exclude(status=Attempt.Status.IN_PROGRESS).update(
+            score=score, max_score=max_score
+        )
+    return Attempt.objects.get(pk=attempt.pk)

@@ -67,7 +67,7 @@ class AttemptAdmin(admin.ModelAdmin):
 
 @admin.register(StudentAnswer)
 class StudentAnswerAdmin(admin.ModelAdmin):
-    list_display = ("attempt", "question", "choice", "answered_at")
+    list_display = ("attempt", "question", "choice", "awarded_marks", "answered_at")
 
     def has_add_permission(self, request):
         return False
