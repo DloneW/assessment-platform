@@ -163,4 +163,7 @@ def course_detail(request, pk):
         context["enrolled_count"] = course.enrollments.count()
         context["tests"] = course.tests.all()
         context["can_create_test"] = services.can_create_test(request.user, course)
+    else:
+        # Students see only published tests, and each link is re-checked by the test views.
+        context["student_tests"] = course.tests.filter(status=Test.Status.PUBLISHED)
     return render(request, "accounts/course_detail.html", context)

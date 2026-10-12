@@ -16,5 +16,12 @@
 <p>No tests yet.</p>
 {% endfor %}
 {% if can_create_test %}<p><a href="{% url 'assessments:test_create' course.pk %}">Create a test</a></p>{% endif %}
+{% else %}
+<h2>Tests</h2>
+{% for test in student_tests %}
+<div class="card"><a href="{% url 'assessments:test_intro' test.pk %}">{{ test.title }}</a> <span class="muted">{{ test.duration_minutes }} min</span></div>
+{% empty %}
+<p>No tests are published for this course yet.</p>
+{% endfor %}
 {% endif %}
 {% endblock %}

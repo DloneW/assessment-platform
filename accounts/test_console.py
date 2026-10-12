@@ -449,3 +449,17 @@ class EnrolmentConsoleTests(AuthzTestCase):
         self.client.force_login(self.app_admin)
         self.client.get(self.url)
         self.assertEqual(self.Enrollment.objects.count(), before)
+
+
+class StudentCoursePageTests(AuthzTestCase):
+    def test_student_course_page_lists_only_published_tests(self):
+        from assessments import services as aservices
+
+        pub = aservices.create_test(course=self.cyb201, creator=self.lect1, cleaned={"title": "PublishedOne", "duration_minutes": 5})
+        aservices.create_question(pub, {"text": "Q", "marks": 1, "choices": ["a", "b"], "correct": 1})
+        aservices.publish_test(pub)
+        aservices.create_test(course=self.cyb201, creator=self.lect1, cleaned={"title": "DraftSecret", "duration_minutes": 5})
+        self.client.force_login(self.alice)
+        page = self.client.get(reverse("accounts:course_detail", args=[self.cyb201.pk]))
+        self.assertContains(page, "PublishedOne")
+        self.assertNotContains(page, "DraftSecret")
