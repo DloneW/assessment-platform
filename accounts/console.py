@@ -28,7 +28,7 @@ from .console_forms import (
     LevelForm,
     generate_temporary_password,
 )
-from .models import Course, Department, Level
+from .models import Course, Department, Enrollment, Level
 
 logger = logging.getLogger("accounts.console")
 User = get_user_model()
@@ -113,6 +113,49 @@ def course_edit(request, pk=None):
         return redirect("accounts:console_courses")
     title = f"Edit course {course.code}" if course else "Add course"
     return render(request, "console/form.html", {"form": form, "title": title, "back": "accounts:console_courses"})
+
+
+# --- Enrolment ----------------------------------------------------------------------
+
+def _eligible_students(course):
+    """Active students whose department AND level match the course (the same rule students are
+    held to when they open it). The role is re-checked with the STUDENT group."""
+    return (
+        users_with_role(STUDENT)
+        .filter(is_active=True, student_profile__department_id=course.department_id,
+                student_profile__level_id=course.level_id)
+        .select_related("student_profile")
+        .order_by("student_profile__student_id")
+    )
+
+
+@require_http_methods(["GET", "HEAD", "POST"])
+@console_only
+def course_enrolment(request, pk):
+    """Enrol eligible students in a course. Only students whose department and level match can be
+    enrolled; ids from the form are intersected with that set, so a forged id enrols nobody."""
+    course = get_object_or_404(Course, pk=pk)
+    eligible = _eligible_students(course)
+    enrolled_ids = set(course.enrollments.values_list("student__user_id", flat=True))
+    if request.method == "POST":
+        pool = {u.pk: u for u in eligible if u.pk not in enrolled_ids}
+        if request.POST.get("action") == "all":
+            chosen = list(pool.values())
+        else:
+            wanted = {int(v) for v in request.POST.getlist("student") if v.isdigit() and len(v) < 19}
+            chosen = [pool[i] for i in wanted if i in pool]
+        Enrollment.objects.bulk_create(
+            [Enrollment(student=u.student_profile, course=course) for u in chosen], ignore_conflicts=True
+        )
+        logger.info("console: user %s enrolled %d student(s) in course %s", request.user.pk, len(chosen), course.pk)
+        messages.success(request, f"Enrolled {len(chosen)} student(s) in {course.code}.")
+        return redirect("accounts:console_course_enrolment", pk=course.pk)
+    rows = [{"user": u, "enrolled": u.pk in enrolled_ids} for u in eligible]
+    return render(
+        request,
+        "console/enrolment.html",
+        {"course": course, "rows": rows, "n_waiting": sum(1 for r in rows if not r["enrolled"])},
+    )
 
 
 # --- Lecturers ----------------------------------------------------------------------

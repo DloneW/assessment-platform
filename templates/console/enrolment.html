@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Enrol students{% endblock %}
+{% block content %}
+{% include "console/nav.html" %}
+<h1>Enrol students: {{ course.code }}</h1>
+<p class="muted">{{ course.title }} &middot; {{ course.department.name }}, {{ course.level }}. Only active students in this department and level can be enrolled.</p>
+{% if n_waiting %}
+<form method="post">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="all">
+  <button type="submit">Enrol all {{ n_waiting }} waiting student{{ n_waiting|pluralize }}</button>
+</form>
+<h2>Or choose students</h2>
+{% endif %}
+<form method="post">
+  {% csrf_token %}
+  <table>
+    <tr><th></th><th>Matric number</th><th>Name</th><th>Status</th></tr>
+    {% for row in rows %}
+    <tr>
+      <td>{% if not row.enrolled %}<input type="checkbox" name="student" value="{{ row.user.pk }}">{% endif %}</td>
+      <td>{{ row.user.student_profile.student_id }}</td>
+      <td>{{ row.user.get_full_name|default:row.user.username }}</td>
+      <td>{% if row.enrolled %}enrolled{% else %}not enrolled{% endif %}</td>
+    </tr>
+    {% empty %}
+    <tr><td colspan="4">No student matches this course's department and level yet.</td></tr>
+    {% endfor %}
+  </table>
+  {% if n_waiting %}<button type="submit">Enrol selected</button>{% endif %}
+</form>
+<p><a href="{% url 'accounts:console_courses' %}">Back to courses</a></p>
+{% endblock %}

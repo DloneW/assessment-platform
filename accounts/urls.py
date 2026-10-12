@@ -25,6 +25,7 @@ urlpatterns = [
     path("manage/courses/", console.courses, name="console_courses"),
     path("manage/courses/add/", console.course_edit, name="console_course_add"),
     path("manage/courses/<int:pk>/edit/", console.course_edit, name="console_course_edit"),
+    path("manage/courses/<int:pk>/enrolment/", console.course_enrolment, name="console_course_enrolment"),
     path("manage/lecturers/", console.lecturers, name="console_lecturers"),
     path("manage/lecturers/add/", console.lecturer_add, name="console_lecturer_add"),
     path("manage/accounts/", console.accounts_list, name="console_accounts"),

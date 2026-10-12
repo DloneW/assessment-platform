@@ -57,9 +57,10 @@ ROUTE_POLICY = {
     "console_lecturers": "application ADMIN; GET/HEAD only",
     "console_lecturer_add": "application ADMIN; GET/POST; creates LECTURER with a one-time temporary password",
     "console_accounts": "application ADMIN; GET/HEAD only; lists only resettable accounts",
+    "console_course_enrolment": "application ADMIN; GET/POST; missing id 404; only dept+level-matching students enrollable",
     "console_reset_password": "application ADMIN + can_reset_password (never self/staff/superuser/ADMIN), else 404; GET/POST",
 }
-OBJECT_ID_ROUTES = {"console_department_edit", "console_department_delete", "console_course_edit", "console_reset_password"}
+OBJECT_ID_ROUTES = {"console_department_edit", "console_department_delete", "console_course_edit", "console_course_enrolment", "console_reset_password"}
 # Every URL name in the "assessments" namespace: (allowed method, who, what a denied object gets).
 ASSESSMENT_ROUTE_POLICY = {
     "test_create": ("GET/POST", "can_create_test on the course in the URL, else 404"),
@@ -167,6 +168,8 @@ class RouteInventoryTests(BoundaryTestCase):
         # (is_staff + model permissions); there is no application route for either.
         for ns, name, pattern in walk(get_resolver().url_patterns):
             if ns == "accounts":
+                if name == "console_course_enrolment":
+                    continue  # the one deliberate route: ADMIN-only, dept+level-matched, tested in test_console
                 self.assertNotRegex(pattern, r"enrol|role|group|permission", msg=f"{name}: {pattern}")
 
     def test_anonymous_users_never_reach_protected_routes(self):

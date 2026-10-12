@@ -149,6 +149,10 @@ Roles can also be changed in the Django admin (Users -> Groups), but only by sup
 - **No login throttling.** Repeated password guesses are not rate-limited.
 - **Production flags** (HTTPS-only cookies, HSTS, SSL redirect) are configured for `DEBUG=False`; see "Deployment".
 
+### Enrolling students
+
+A student sees a course (and its tests) only if they are **enrolled** and their department and level match the course. In the Administration Console go to **Courses → Enrol students**: enrol everyone who matches in one click, or tick individual students. Students from other departments or levels cannot be enrolled (the server ignores forged ids). There is no un-enrol page yet; use Django admin for that.
+
 ## Question types, uploads and marking
 
 Each question is one of three kinds, chosen by the lecturer:

@@ -10,7 +10,8 @@
   {% if not c.is_active %}<span class="tag">closed</span>{% endif %}<br>
   <span class="muted">{{ c.department.name }}, {{ c.level }}</span><br>
   <span class="muted">Lecturers: {% for l in c.lecturers.all %}{{ l.get_full_name|default:l.username }}{% if not forloop.last %}, {% endif %}{% empty %}none assigned{% endfor %}</span><br>
-  <a href="{% url 'accounts:console_course_edit' c.pk %}">Edit / assign lecturers</a>
+  <a href="{% url 'accounts:console_course_edit' c.pk %}">Edit / assign lecturers</a> &middot;
+  <a href="{% url 'accounts:console_course_enrolment' c.pk %}">Enrol students</a>
 </div>
 {% empty %}<p>No courses yet.</p>{% endfor %}
 {% endblock %}

@@ -8,6 +8,7 @@ from django.urls import reverse
 from accounts.console_forms import generate_temporary_password
 from accounts.models import Course, Department, Level
 from authorization.test_boundary import masked
+from authorization import services as authz
 from authorization.roles import ADMIN, LECTURER, STUDENT, holds_role
 from authorization.tests import PASSWORD, AuthzTestCase, make_user
 
@@ -400,3 +401,51 @@ class CreateAppAdminPromptTests(AuthzTestCase):
         self.assertFalse(User.objects.filter(username="promptadmin").exists())
         self.run_interactive(["Prompt-Pass-2026x", "Prompt-Pass-2026x"])
         self.assertTrue(User.objects.get(username="promptadmin").check_password("Prompt-Pass-2026x"))
+
+
+class EnrolmentConsoleTests(AuthzTestCase):
+    """Console enrolment: dept+level matched students only; ADMIN only."""
+
+    def setUp(self):
+        super().setUp()
+        from accounts.models import Enrollment
+
+        self.Enrollment = Enrollment
+        Enrollment.objects.filter(course=self.cyb201).delete()  # the shared fixture pre-enrols mismatched students
+        self.url = reverse("accounts:console_course_enrolment", args=[self.cyb201.pk])
+
+    def test_admin_enrols_all_eligible_only(self):
+        self.client.force_login(self.app_admin)
+        self.assertEqual(self.client.get(self.url).status_code, 200)
+        self.client.post(self.url, {"action": "all"})
+        enrolled = set(self.cyb201.enrollments.values_list("student__user__username", flat=True))
+        self.assertIn(self.alice.username, enrolled)
+        self.assertNotIn(self.carol.username, enrolled)  # wrong department
+        self.assertNotIn(self.dave.username, enrolled)  # wrong level
+
+    def test_forged_ids_cannot_enrol_ineligible_students(self):
+        self.client.force_login(self.app_admin)
+        self.client.post(self.url, {"student": [str(self.carol.pk), str(self.dave.pk), "abc"]})
+        self.assertEqual(self.Enrollment.objects.filter(course=self.cyb201, student__user__in=[self.carol, self.dave]).count(), 0)
+
+    def test_enrolling_twice_is_harmless_and_lets_student_in(self):
+        self.client.force_login(self.app_admin)
+        self.client.post(self.url, {"action": "all"})
+        self.client.post(self.url, {"action": "all"})
+        self.assertEqual(self.cyb201.enrollments.filter(student__user=self.alice).count(), 1)
+        self.client.force_login(self.alice)
+        self.assertTrue(authz.can_access_course(self.alice, self.cyb201))
+
+    def test_non_admins_are_refused_and_nothing_changes(self):
+        before = self.Enrollment.objects.count()
+        for user in (self.lect1, self.alice):
+            self.client.force_login(user)
+            self.assertEqual(self.client.get(self.url).status_code, 403)
+            self.assertEqual(self.client.post(self.url, {"action": "all"}).status_code, 403)
+        self.assertEqual(self.Enrollment.objects.count(), before)
+
+    def test_get_does_not_enrol(self):
+        before = self.Enrollment.objects.count()
+        self.client.force_login(self.app_admin)
+        self.client.get(self.url)
+        self.assertEqual(self.Enrollment.objects.count(), before)
