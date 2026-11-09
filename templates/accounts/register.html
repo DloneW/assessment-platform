@@ -2,6 +2,9 @@
 {% block title %}Register{% endblock %}
 {% block content %}
 <h1>Student registration</h1>
+{% if not form.fields.department.queryset.exists or not form.fields.level.queryset.exists %}
+<p class="errorlist">Registration is not set up yet: no departments or levels exist. An administrator must add them in the Administration Console (or run <code>python manage.py seed_reference_data</code>).</p>
+{% endif %}
 <form method="post" novalidate>
   {% csrf_token %}
   {{ form.non_field_errors }}

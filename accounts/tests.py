@@ -344,3 +344,36 @@ class CourseEnrollmentTests(BaseTestCase):
         user.delete()
         self.assertEqual(StudentProfile.courses.through.objects.count(), 0)
         self.assertEqual(Course.objects.count(), 2)
+
+
+class SeedReferenceDataTests(TestCase):
+    def run_cmd(self):
+        import io
+
+        from django.core.management import call_command
+
+        call_command("seed_reference_data", stdout=io.StringIO())
+
+    def test_fills_empty_tables_and_registration_then_offers_choices(self):
+        from accounts.models import Department, Level
+
+        self.assertFalse(Department.objects.exists() or Level.objects.exists())
+        page = self.client.get(reverse("accounts:register"))
+        self.assertContains(page, "Registration is not set up yet")
+        self.run_cmd()
+        self.assertTrue(Department.objects.filter(name="Cybersecurity").exists())
+        self.assertEqual(Level.objects.count(), 5)
+        page = self.client.get(reverse("accounts:register"))
+        self.assertNotContains(page, "Registration is not set up yet")
+        self.assertContains(page, "Cybersecurity")
+        self.assertContains(page, "200 Level")
+
+    def test_never_touches_an_existing_setup_and_is_idempotent(self):
+        from accounts.models import Department, Level
+
+        Department.objects.create(name="Only Mine")
+        Level.objects.create(number=200)
+        self.run_cmd()
+        self.run_cmd()
+        self.assertEqual(list(Department.objects.values_list("name", flat=True)), ["Only Mine"])
+        self.assertEqual(list(Level.objects.values_list("number", flat=True)), [200])

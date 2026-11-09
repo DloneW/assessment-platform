@@ -110,6 +110,14 @@ For local development, configure `DJANGO_DEBUG=True` and the appropriate local s
 python manage.py migrate
 ```
 
+### Load starting departments and levels
+
+A new database has no departments or levels, so the registration drop-downs are empty and nobody can register. Load a starter set (only into empty tables; edit them later in the Administration Console):
+
+```bash
+python manage.py seed_reference_data
+```
+
 ### 6. Create a Django superuser
 
 ```bash
