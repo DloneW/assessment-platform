@@ -709,6 +709,8 @@ class InputSecurityTests(AssessmentTestCase):
             (self.alice, self.attempt_url(a, "attempt_save")),
             (self.alice, self.attempt_url(a, "attempt_submit")),
             (self.lect1, reverse("assessments:test_create", args=[self.cyb201.pk])),
+            (self.lect1, reverse("assessments:import_assessment", args=[self.cyb201.pk])),
+            (self.lect1, reverse("assessments:question_bank", args=[self.cyb201.pk])),
             (self.lect1, reverse("assessments:test_edit", args=[draft.pk])),
             (self.lect1, reverse("assessments:question_add", args=[draft.pk])),
             (self.lect1, reverse("assessments:question_edit", args=[draft.pk, q.pk])),

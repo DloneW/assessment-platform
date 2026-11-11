@@ -8,7 +8,7 @@ The platform is designed around a central principle: **the server, not the clien
 
 **Deployment configuration prepared. End-to-end hosted verification remains outstanding.**
 
-The application has completed five development days covering its academic models, authorization architecture, assessment engine, security hardening, and deployment preparation.
+The application includes academic models, authorization, timed assessments, assessment imports, lecturer marking, and deployment preparation.
 
 Local verification included Gunicorn, PostgreSQL 16, Django deployment checks, and HTTP security smoke tests. The Render deployment configuration was prepared separately. A successful local test run does not establish that every security control works correctly on the hosted service.
 
@@ -22,6 +22,7 @@ Local verification included Gunicorn, PostgreSQL 16, Django deployment checks, a
 - Timed assessments with questions, choices, attempts, and server-side scoring.
 - Multiple-choice, short-answer, and file-upload questions.
 - Lecturer-managed marking and feedback for written answers and uploaded files.
+- Assessment imports with editable previews, import history, and a course-scoped question bank.
 - Assessment lifecycle controls, including draft, published, and archived states.
 - Security regression tests covering authorization failures, forged inputs, CSRF, XSS, session handling, and assessment integrity.
 - PostgreSQL-compatible database configuration, Gunicorn, WhiteNoise, and Render deployment preparation.
@@ -29,7 +30,7 @@ Local verification included Gunicorn, PostgreSQL 16, Django deployment checks, a
 ### Not yet implemented or fully verified
 
 - End-to-end verification of the hosted deployment.
-- Lecturer-facing result and analytics dashboards.
+- Aggregate assessment-result and analytics dashboards.
 - Retakes and background processing for automatic expiry.
 - Login throttling, MFA, email verification, and a self-service password-reset workflow.
 - Malware scanning for uploaded files.
@@ -46,6 +47,7 @@ Local verification included Gunicorn, PostgreSQL 16, Django deployment checks, a
 | Static file serving | WhiteNoise |
 | User interface | Django templates and forms |
 | Authentication | Django authentication and sessions |
+| Assessment imports | openpyxl, xlrd, python-docx, pypdf |
 | Testing | Django test framework |
 | Deployment configuration | Render Blueprint |
 
@@ -156,11 +158,17 @@ Open `http://127.0.0.1:8000/`.
 | `/lecturer/dashboard/` | Lecturers |
 | `/admin/dashboard/` | Application administrators |
 | `/manage/` | Academic and account administration |
+| `/manage/courses/<id>/enrolment/` | Application administrators; enrol eligible students |
 | `/password/change/` | Authenticated users required to replace temporary passwords |
 | `/students/<id>/` | Student owner or application administrator |
 | `/courses/<id>/` | Authorized students, assigned lecturers, or application administrators |
 | `/courses/<id>/tests/new/` | Assigned lecturer or application administrator |
+| `/courses/<id>/tests/import/` | Assigned lecturer or application administrator; import questions into a draft |
+| `/courses/<id>/question-bank/` | Assigned lecturer or application administrator; search and reuse course questions |
+| `/imports/template.xlsx` | Authenticated users; download the assessment import template |
 | `/tests/<id>/manage/` | Authorized assessment manager |
+| `/tests/<id>/submissions/` | Authorized assessment manager; review submissions and pending marking |
+| `/tests/<id>/submissions/<attempt-id>/` | Authorized assessment manager; mark written/file answers |
 | `/tests/<id>/` | Eligible students accessing published assessments |
 | `/tests/<id>/start/` | Eligible students starting or resuming an attempt |
 | `/tests/<id>/attempts/<id>/` | Attempt owner |
@@ -259,13 +267,21 @@ Supported uploads include PNG, JPEG, GIF, WebP, PDF, and DOCX files. Validation 
 
 **Upload security limitation:** Uploaded files are not scanned for malware. File validation and forced-download handling reduce exposure but cannot establish that a file is safe.
 
+## Assessment Import and Question Bank
+
+Lecturers can import assessment questions from the lecturer dashboard, course page, or New Test page. Supported files are `.xlsx`, `.xls`, `.csv`, Word `.docx`, selectable-text `.pdf`, and Moodle `.xml`. Uploads are limited to 10 MB and 80 questions. Scanned PDFs require selectable text; OCR is not provided.
+
+Spreadsheet files use a header row with `Question`, options `A` through `E`, and `Correct Answer`; `Question Type`, `Marks`, and `Category` are optional. Empty option cells are ignored. Word and PDF documents use numbered questions, `A)` options, and an `Answer: A` line. Moodle multiple-choice and true/false questions are supported. Imported choice-format types (multiple choice and true/false) remain separate from the assessment response kinds (multiple choice, short answer, and file upload).
+
+Before saving, lecturers can configure assessment details, edit or remove parsed questions, and review validation errors and duplicate warnings. A successful import creates a draft assessment, adds its questions to the course question bank, and records the import atomically. An unfinished preview can be reopened by uploading the same file again; completed or failed files cannot be processed again for that lecturer and course. The reusable question bank supports text search, category filtering, and bulk-adding selected questions to another draft in the same course. Import history displays processing status and errors. The Excel template is linked from the import and question-bank pages.
+
 ## Academic Administration
 
 Application administrators use `/manage/` to manage departments, levels, courses, lecturer accounts, and eligible account password resets.
 
 Public registration always creates a student account. Lecturer accounts are created through the administration console, which generates a temporary password that must be replaced before normal application use.
 
-Student enrollment is explicit. A student can access a course only when the course is active, the student's department and level match the course, and the student is enrolled.
+Student enrollment is explicit and managed by application administrators at `/manage/courses/<id>/enrolment/`. Only active students whose department and level match the course can be enrolled. A student can access a course only when the course is active, the student's department and level match the course, and the student is enrolled.
 
 Student identity details supplied during registration are not independently verified. Enrollment therefore acts as an additional access-control requirement, not proof of identity.
 

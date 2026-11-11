@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Import assessment{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>Import assessment questions</h1>
+<p class="muted">Course: {{ course.code }} &ndash; {{ course.title }}</p>
+<p>Upload an Excel, CSV, Word (.docx), PDF, or Moodle XML file. You can edit and validate the questions before creating a draft assessment.</p>
+<p><a href="{% url 'assessments:import_template' %}">Download Excel import template</a></p>
+<form method="post" enctype="multipart/form-data" id="import-form">
+  {% csrf_token %}
+  {{ form.non_field_errors }}
+  {% for field in form %}
+    {% if field.name != "file" %}
+      {{ field.label_tag }}{{ field }}{{ field.errors }}
+    {% endif %}
+  {% endfor %}
+  <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="Choose or drop an import file">
+    <strong>Drop an import file here or choose a file</strong>
+    <p class="muted" id="file-name">Maximum file size: 10 MB.</p>
+    {{ form.file.label_tag }}{{ form.file }}{{ form.file.errors }}
+  </div>
+  <button type="submit" name="action" value="preview">Preview questions</button>
+</form>
+<p><a href="{% url 'assessments:test_create' course.pk %}">Back to New Test</a></p>
+<style>
+  .drop-zone { border: 2px dashed #718096; border-radius: 8px; padding: 1rem; margin-top: 1rem; text-align: center; }
+  .drop-zone:focus, .drop-zone.dragging { outline: 3px solid #1f3a5f; background: #edf2f7; }
+  .drop-zone input { margin-top: .75rem; }
+</style>
+<script>
+  (() => {
+    const zone = document.getElementById("drop-zone");
+    const input = document.getElementById("id_file");
+    const label = document.getElementById("file-name");
+    const showFile = () => { label.textContent = input.files.length ? input.files[0].name : "Maximum file size: 10 MB."; };
+    zone.addEventListener("click", event => {
+      if (event.target !== input) { event.preventDefault(); input.click(); }
+    });
+    zone.addEventListener("keydown", event => {
+      if (event.key === "Enter" || event.key === " ") { event.preventDefault(); input.click(); }
+    });
+    input.addEventListener("change", showFile);
+    for (const eventName of ["dragenter", "dragover"]) {
+      zone.addEventListener(eventName, event => { event.preventDefault(); zone.classList.add("dragging"); });
+    }
+    for (const eventName of ["dragleave", "drop"]) {
+      zone.addEventListener(eventName, event => { event.preventDefault(); zone.classList.remove("dragging"); });
+    }
+    zone.addEventListener("drop", event => {
+      if (event.dataTransfer.files.length) { input.files = event.dataTransfer.files; showFile(); }
+    });
+  })();
+</script>
+{% endblock %}

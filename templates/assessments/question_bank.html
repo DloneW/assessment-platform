@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Question bank{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>Question bank</h1>
+<p class="muted">{{ course.code }} &ndash; {{ course.title }}</p>
+<p><a href="{% url 'assessments:import_assessment' course.pk %}">Import questions</a> &middot;
+   <a href="{% url 'assessments:import_template' %}">Download Excel template</a></p>
+
+<form method="get" class="filter-form" role="search">
+  <label for="bank-search">Search questions</label>
+  <input id="bank-search" type="search" name="q" value="{{ search }}">
+  <label for="bank-category">Category</label>
+  <select id="bank-category" name="category">
+    <option value="">All categories</option>
+    {% for category in categories %}
+      <option value="{{ category }}" {% if selected_category == category %}selected{% endif %}>{{ category }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">Filter</button>
+</form>
+
+<form method="post">
+  {% csrf_token %}
+  {% if draft_tests %}
+    <label for="target-test">Add selected questions to draft</label>
+    <select id="target-test" name="test_id" required>
+      <option value="">Choose an assessment</option>
+      {% for test in draft_tests %}<option value="{{ test.pk }}">{{ test.title }}</option>{% endfor %}
+    </select>
+    <div class="bank-actions"><button type="button" id="select-all">Select all visible</button><button type="submit">Add selected questions</button></div>
+  {% endif %}
+  {% for question in questions %}
+    <article class="card bank-question">
+      {% if draft_tests %}<label class="inline-label"><input type="checkbox" name="question_ids" value="{{ question.pk }}"> Select</label>{% endif %}
+      <h2>{{ question.text|linebreaksbr }}</h2>
+      <p class="muted">
+        {{ question.get_question_type_display }} &middot; {{ question.marks }} mark{{ question.marks|pluralize }}
+        {% if question.category %}&middot; {{ question.category }}{% endif %}
+      </p>
+      <ol type="A">{% for choice in question.choices %}<li>{{ choice }}</li>{% endfor %}</ol>
+    </article>
+  {% empty %}
+    <p>No questions match this filter. Import a file to start building the bank.</p>
+  {% endfor %}
+</form>
+
+<h2>Import history</h2>
+{% for item in history %}
+  <div class="card">
+    <strong>{{ item.file_name }}</strong>
+    <span class="tag">{{ item.get_status_display }}</span>
+    <span class="muted">{{ item.created_at }} &middot; {{ item.question_count }} question{{ item.question_count|pluralize }}</span>
+    {% if item.details %}<p role="status">{{ item.details }}</p>{% endif %}
+  </div>
+{% empty %}
+  <p>No imports have been recorded for this course.</p>
+{% endfor %}
+<p><a href="{% url 'accounts:course_detail' course.pk %}">Back to course</a></p>
+<style>
+  .filter-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .5rem; align-items: end; }
+  .filter-form button { margin: 0; }
+  .bank-actions { display: flex; gap: .5rem; flex-wrap: wrap; }
+  .bank-actions button { margin-top: .75rem; }
+  .bank-question h2 { font-size: 1.05rem; }
+  .inline-label { display: flex; align-items: center; gap: .5rem; }
+  .inline-label input { width: auto; margin: 0; }
+</style>
+{% if draft_tests %}
+<script>
+  document.getElementById("select-all").addEventListener("click", () => {
+    document.querySelectorAll('input[name="question_ids"]').forEach(item => { item.checked = true; });
+  });
+</script>
+{% endif %}
+{% endblock %}

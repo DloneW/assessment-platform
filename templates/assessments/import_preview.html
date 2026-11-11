@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Review imported questions{% endblock %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1>Review imported questions</h1>
+<p class="muted">{{ history.file_name }} &middot; {{ questions|length }} question{{ questions|length|pluralize }} detected</p>
+{% if form.non_field_errors %}<div class="card error-panel" role="alert">{{ form.non_field_errors }}</div>{% endif %}
+{% if row_errors %}
+  <div class="card error-panel" role="alert">
+    <strong>Review these issues before saving:</strong>
+    <ul>{% for error in row_errors %}<li>{{ error }}</li>{% endfor %}</ul>
+  </div>
+{% endif %}
+<form method="post">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="save">
+  <input type="hidden" name="import_id" value="{{ history.pk }}">
+  <input type="hidden" name="question_count" value="{{ questions|length }}">
+  <fieldset>
+    <legend>Assessment details</legend>
+    {% for field in form %}
+      {% if field.name != "file" %}
+        {{ field.label_tag }}{{ field }}{{ field.errors }}
+      {% endif %}
+    {% endfor %}
+  </fieldset>
+  <h2>Editable question preview</h2>
+  <p class="muted">Correct answer is the option letter. Uncheck any question you do not want to import.</p>
+  {% for question in questions %}
+    <fieldset class="card question-preview">
+      <legend>Question {{ forloop.counter }}</legend>
+      {% if question.errors %}
+        <div class="error-panel" role="alert">
+          <strong>Needs attention:</strong>
+          <ul>{% for error in question.errors %}<li>{{ error }}</li>{% endfor %}</ul>
+        </div>
+      {% endif %}
+      <label for="question_{{ forloop.counter0 }}_text">Question text</label>
+      <textarea id="question_{{ forloop.counter0 }}_text" name="question_{{ forloop.counter0 }}_text" rows="3" maxlength="2000" required>{{ question.text }}</textarea>
+      <div class="question-fields">
+        <div>
+          <label for="question_{{ forloop.counter0 }}_type">Question type</label>
+          <select id="question_{{ forloop.counter0 }}_type" name="question_{{ forloop.counter0 }}_type">
+            <option value="MULTIPLE_CHOICE" {% if question.question_type == "MULTIPLE_CHOICE" %}selected{% endif %}>Multiple choice</option>
+            <option value="TRUE_FALSE" {% if question.question_type == "TRUE_FALSE" %}selected{% endif %}>True / false</option>
+          </select>
+        </div>
+        <div>
+          <label for="question_{{ forloop.counter0 }}_marks">Marks</label>
+          <input id="question_{{ forloop.counter0 }}_marks" name="question_{{ forloop.counter0 }}_marks" type="number" min="1" max="100" value="{{ question.marks }}" required>
+        </div>
+        <div>
+          <label for="question_{{ forloop.counter0 }}_category">Category</label>
+          <input id="question_{{ forloop.counter0 }}_category" name="question_{{ forloop.counter0 }}_category" maxlength="100" value="{{ question.category }}">
+        </div>
+      </div>
+      {% for choice in question.choice_fields %}
+        <label for="question_{{ forloop.parentloop.counter0 }}_choice_{{ choice.letter }}">Option {{ choice.letter }}</label>
+        <input id="question_{{ forloop.parentloop.counter0 }}_choice_{{ choice.letter }}" name="question_{{ forloop.parentloop.counter0 }}_choice_{{ choice.letter }}" maxlength="500" value="{{ choice.value }}">
+      {% endfor %}
+      <label for="question_{{ forloop.counter0 }}_correct">Correct answer</label>
+      <select id="question_{{ forloop.counter0 }}_correct" name="question_{{ forloop.counter0 }}_correct">
+        <option value="" {% if not question.correct %}selected{% endif %}>Select correct answer</option>
+        {% for choice in question.choice_fields %}
+          <option value="{{ forloop.counter }}" {% if question.correct == forloop.counter %}selected{% endif %}>{{ choice.letter }}</option>
+        {% endfor %}
+      </select>
+      <label class="inline-label" for="delete_{{ forloop.counter0 }}">
+        <input id="delete_{{ forloop.counter0 }}" name="delete_{{ forloop.counter0 }}" type="checkbox">
+        Exclude this question
+      </label>
+    </fieldset>
+  {% empty %}
+    <p>No questions were extracted. Try another file.</p>
+  {% endfor %}
+  {{ form.title.errors }}{{ form.duration_minutes.errors }}{{ form.opens_at.errors }}{{ form.closes_at.errors }}
+  <button type="submit">Validate and create draft</button>
+</form>
+<p><a href="{% url 'assessments:import_assessment' course.pk %}">Start over with another file</a></p>
+<style>
+  .question-preview { min-width: 0; }
+  .question-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: .75rem; }
+  .inline-label { display: flex; align-items: center; gap: .5rem; }
+  .inline-label input { width: auto; margin: 0; }
+  .error-panel { color: #8a1c13; background: #fff1f0; border-color: #e4a6a2; }
+  @media (max-width: 600px) { .question-preview { padding: .6rem; } }
+</style>
+{% endblock %}

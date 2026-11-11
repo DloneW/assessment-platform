@@ -7,6 +7,9 @@ app_name = "assessments"
 urlpatterns = [
     # Lecturer / admin authoring
     path("courses/<int:course_pk>/tests/new/", views.create_test, name="test_create"),
+    path("courses/<int:course_pk>/tests/import/", views.import_assessment, name="import_assessment"),
+    path("courses/<int:course_pk>/question-bank/", views.question_bank, name="question_bank"),
+    path("imports/template.xlsx", views.import_template, name="import_template"),
     path("tests/<int:pk>/manage/", views.test_manage, name="test_manage"),
     path("tests/<int:pk>/edit/", views.test_edit, name="test_edit"),
     path("tests/<int:pk>/questions/add/", views.question_add, name="question_add"),

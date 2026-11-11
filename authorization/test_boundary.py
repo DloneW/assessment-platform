@@ -64,6 +64,9 @@ OBJECT_ID_ROUTES = {"console_department_edit", "console_department_delete", "con
 # Every URL name in the "assessments" namespace: (allowed method, who, what a denied object gets).
 ASSESSMENT_ROUTE_POLICY = {
     "test_create": ("GET/POST", "can_create_test on the course in the URL, else 404"),
+    "import_assessment": ("GET/POST", "can_create_test on the course in the URL, else 404"),
+    "question_bank": ("GET/POST", "can_manage_course on the course in the URL, else 404; selected test must be draft and in course"),
+    "import_template": ("GET/HEAD", "login required; downloads a generic template"),
     "test_manage": ("GET", "can_manage_test, else 404"),
     "test_edit": ("GET/POST", "can_manage_test, else 404; draft only"),
     "question_add": ("GET/POST", "can_manage_test, else 404; draft only"),
@@ -146,7 +149,9 @@ class RouteInventoryTests(BoundaryTestCase):
         from django.urls import NoReverseMatch  # noqa: F401  (documenting the failure mode)
 
         args = {
-            "test_create": [self.cyb201.pk], "test_manage": [1], "test_edit": [1], "question_add": [1],
+            "test_create": [self.cyb201.pk], "import_assessment": [self.cyb201.pk],
+            "question_bank": [self.cyb201.pk], "import_template": [],
+            "test_manage": [1], "test_edit": [1], "question_add": [1],
             "question_edit": [1, 1], "question_delete": [1, 1], "test_publish": [1], "test_archive": [1],
             "test_intro": [1], "attempt_start": [1], "attempt_detail": [1, 1], "attempt_save": [1, 1], "attempt_submit": [1, 1],
             "submissions": [1], "grade": [1, 1], "answer_file": [1, 1, 1],

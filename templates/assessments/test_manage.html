@@ -13,7 +13,8 @@
 
 <div>
   {% if can_edit %}<a href="{% url 'assessments:test_edit' test.pk %}">Edit details</a> &middot;
-  <a href="{% url 'assessments:question_add' test.pk %}">Add question</a>{% endif %}
+  <a href="{% url 'assessments:question_add' test.pk %}">Add question</a> &middot;
+  <a href="{% url 'assessments:question_bank' test.course.pk %}">Add from question bank</a>{% endif %}
   {% if can_publish %}
   <form class="inline" method="post" action="{% url 'assessments:test_publish' test.pk %}">{% csrf_token %}<button type="submit">Publish</button></form>
   {% endif %}
