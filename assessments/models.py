@@ -96,9 +96,14 @@ class Question(models.Model):
         SHORT = "SHORT", "Short answer"  # typed text, marked by a lecturer
         FILE = "FILE", "File upload"  # an image or document, marked by a lecturer
 
+    class Type(models.TextChoices):
+        MULTIPLE_CHOICE = "MULTIPLE_CHOICE", "Multiple choice"
+        TRUE_FALSE = "TRUE_FALSE", "True / false"
+
     test = models.ForeignKey(Test, on_delete=models.CASCADE, related_name="questions")
     kind = models.CharField(max_length=5, choices=Kind.choices, default=Kind.MCQ)
     text = models.TextField()
+    question_type = models.CharField(max_length=20, choices=Type.choices, default=Type.MULTIPLE_CHOICE)
     order = models.PositiveSmallIntegerField()
     marks = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
     # Lecturer-only notes for marking SHORT/FILE questions. Server-side data like the answer key:
@@ -125,6 +130,56 @@ class Question(models.Model):
     @property
     def needs_manual_grading(self):
         return self.kind != self.Kind.MCQ
+
+
+class QuestionBankQuestion(models.Model):
+    """A lecturer's reusable, course-scoped question and answer key."""
+
+    course = models.ForeignKey("accounts.Course", on_delete=models.CASCADE, related_name="bank_questions")
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="bank_questions")
+    text = models.TextField()
+    question_type = models.CharField(max_length=20, choices=Question.Type.choices, default=Question.Type.MULTIPLE_CHOICE)
+    category = models.CharField(max_length=100, blank=True)
+    marks = models.PositiveSmallIntegerField(default=1, validators=[MinValueValidator(1)])
+    choices = models.JSONField()
+    correct_choice = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["category", "text"]
+        constraints = [
+            models.CheckConstraint(condition=Q(marks__gte=1), name="assessments_bank_marks_positive"),
+            models.CheckConstraint(condition=Q(correct_choice__gte=1), name="assessments_bank_correct_choice_positive"),
+        ]
+
+    def __str__(self):
+        return self.text[:80]
+
+
+class ImportHistory(models.Model):
+    class Status(models.TextChoices):
+        PREVIEWED = "PREVIEWED", "Preview ready"
+        COMPLETED = "COMPLETED", "Imported"
+        FAILED = "FAILED", "Failed"
+
+    course = models.ForeignKey("accounts.Course", on_delete=models.CASCADE, related_name="assessment_imports")
+    creator = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="assessment_imports")
+    file_name = models.CharField(max_length=255)
+    file_hash = models.CharField(max_length=64)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PREVIEWED)
+    question_count = models.PositiveSmallIntegerField(default=0)
+    details = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["course", "creator", "file_hash"], name="assessments_import_file_once"),
+        ]
+
+    def __str__(self):
+        return f"{self.file_name} ({self.get_status_display()})"
 
 
 class Choice(models.Model):

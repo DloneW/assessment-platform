@@ -8,5 +8,6 @@
   {{ form.as_p }}
   <button type="submit">{% if test %}Save changes{% else %}Create draft{% endif %}</button>
 </form>
+{% if not test %}<p><a href="{% url 'assessments:import_assessment' course.pk %}">Import assessment questions from a file</a></p>{% endif %}
 <p><a href="{% if test %}{% url 'assessments:test_manage' test.pk %}{% else %}{% url 'accounts:course_detail' course.pk %}{% endif %}">Cancel</a></p>
 {% endblock %}

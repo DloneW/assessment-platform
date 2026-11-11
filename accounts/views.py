@@ -13,7 +13,7 @@ from .forms import StudentRegistrationForm
 from .models import Course, StudentProfile
 
 # Assessments are imported lazily-free here: accounts depends on assessments only for dashboard listings.
-from assessments.models import Attempt, Test  # noqa: E402
+from assessments.models import Attempt, ImportHistory, Test  # noqa: E402
 from assessments import services as assessment_services
 
 # HTTP method policy: nothing at the read-only URLs below modifies data, so they accept GET/HEAD
@@ -117,7 +117,8 @@ def student_dashboard(request):
 def lecturer_dashboard(request):
     courses = request.user.taught_courses.select_related("department", "level")
     tests = Test.objects.filter(course__in=services.courses_managed_by(request.user)).select_related("course")
-    return render(request, "accounts/lecturer_dashboard.html", {"courses": courses, "tests": tests})
+    imports = ImportHistory.objects.filter(course__in=services.courses_managed_by(request.user)).select_related("course")[:10]
+    return render(request, "accounts/lecturer_dashboard.html", {"courses": courses, "tests": tests, "imports": imports})
 
 
 @require_safe

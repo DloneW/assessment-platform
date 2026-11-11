@@ -512,7 +512,10 @@ class LecturerWorkflowTests(AssessmentTestCase):
 
     def test_lecturer_dashboard_and_course_page_list_tests(self):
         self.login(self.lect1)
-        self.assertContains(self.client.get(self.lecturer_dashboard()), "Midterm")
+        dashboard = self.client.get(self.lecturer_dashboard())
+        self.assertContains(dashboard, "Midterm")
+        self.assertContains(dashboard, reverse("assessments:import_assessment", args=[self.cyb201.pk]))
+        self.assertContains(dashboard, reverse("assessments:question_bank", args=[self.cyb201.pk]))
         page = self.client.get(self.course_url(self.cyb201))
         self.assertContains(page, "Midterm")
         self.assertContains(page, reverse("assessments:test_create", args=[self.cyb201.pk]))

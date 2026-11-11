@@ -19,10 +19,12 @@ import re
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Max, Q, Sum
 from django.utils import timezone
 
 from . import uploads
+from accounts.models import Course
+
 from .models import (
     MAX_DURATION_MINUTES,
     MAX_FEEDBACK_CHARS,
@@ -30,7 +32,9 @@ from .models import (
     AnswerFile,
     Attempt,
     Choice,
+    ImportHistory,
     Question,
+    QuestionBankQuestion,
     StudentAnswer,
     Test,
 )
@@ -109,6 +113,7 @@ def create_question(test, cleaned):
                 marks=cleaned["marks"],
                 marking_guide=cleaned.get("marking_guide", "") if kind != Question.Kind.MCQ else "",
                 order=highest + 1,
+                question_type=cleaned.get("question_type", Question.Type.MULTIPLE_CHOICE),
             )
             if kind == Question.Kind.MCQ:
                 _write_choices(question, cleaned["choices"], cleaned["correct"])
@@ -126,12 +131,135 @@ def update_question(question, cleaned):
         question.text = cleaned["text"]
         question.marks = cleaned["marks"]
         question.marking_guide = cleaned.get("marking_guide", "") if kind != Question.Kind.MCQ else ""
+        question.question_type = cleaned.get("question_type", Question.Type.MULTIPLE_CHOICE)
         question.save()
         # Drafts have no attempts, so no answers can reference these choices.
         question.choices.all().delete()
         if kind == Question.Kind.MCQ:
             _write_choices(question, cleaned["choices"], cleaned["correct"])
     return question
+
+
+def normalize_question_text(text):
+    return " ".join(text.casefold().split())
+
+
+class ImportConflict(StateError):
+    """The import is duplicated or its preview is no longer available."""
+
+
+def save_imported_assessment(*, course, creator, cleaned, questions, history_id):
+    """Commit an import, its test, questions, and bank entries as one transaction."""
+    with transaction.atomic():
+        history = ImportHistory.objects.select_for_update().get(
+            pk=history_id, course=course, creator=creator
+        )
+        if history.status != ImportHistory.Status.PREVIEWED:
+            raise ImportConflict("This import preview has already been used or has expired.")
+        if not questions:
+            raise ImportConflict("Select at least one valid question to import.")
+        Course.objects.select_for_update().get(pk=course.pk)
+        incoming = [normalize_question_text(item["text"]) for item in questions]
+        if len(incoming) != len(set(incoming)):
+            raise ImportConflict("The preview contains duplicate questions.")
+        for item in questions:
+            choices = item.get("choices", [])
+            if (
+                not item.get("text")
+                or len(item["text"]) > 2000
+                or not 1 <= item.get("marks", 0) <= 100
+                or item.get("question_type") not in Question.Type.values
+                or not 2 <= len(choices) <= 5
+                or any(not choice or len(choice) > 500 for choice in choices)
+                or not 1 <= item.get("correct", 0) <= len(choices)
+                or (item["question_type"] == Question.Type.TRUE_FALSE and len(choices) != 2)
+                or len(item.get("category", "")) > 100
+            ):
+                raise ImportConflict("One or more questions are invalid. Review the preview and try again.")
+        existing_test_texts = Question.objects.filter(test__course=course).values_list("text", flat=True)
+        existing_bank_texts = QuestionBankQuestion.objects.filter(course=course).values_list("text", flat=True)
+        existing = {normalize_question_text(text) for text in (*existing_test_texts, *existing_bank_texts)}
+        if existing.intersection(incoming):
+            raise ImportConflict("One or more questions already exist in this course's question bank or tests.")
+
+        test = Test.objects.create(
+            course=course,
+            creator=creator,
+            title=cleaned["title"],
+            description=cleaned.get("description", ""),
+            duration_minutes=cleaned["duration_minutes"],
+            opens_at=cleaned.get("opens_at"),
+            closes_at=cleaned.get("closes_at"),
+        )
+        for order, item in enumerate(questions, start=1):
+            question = Question.objects.create(
+                test=test,
+                kind=Question.Kind.MCQ,
+                text=item["text"],
+                order=order,
+                marks=item["marks"],
+                question_type=item["question_type"],
+            )
+            Choice.objects.bulk_create(
+                [
+                    Choice(question=question, text=choice, order=position, is_correct=(position == item["correct"]))
+                    for position, choice in enumerate(item["choices"], start=1)
+                ]
+            )
+            QuestionBankQuestion.objects.create(
+                course=course,
+                creator=creator,
+                text=item["text"],
+                question_type=item["question_type"],
+                category=item.get("category", ""),
+                marks=item["marks"],
+                choices=item["choices"],
+                correct_choice=item["correct"],
+            )
+        history.status = ImportHistory.Status.COMPLETED
+        history.question_count = len(questions)
+        history.completed_at = timezone.now()
+        history.details = ""
+        history.save(update_fields=["status", "question_count", "completed_at", "details"])
+    return test
+
+
+def add_bank_questions(test, question_ids):
+    """Add selected course-bank questions to a draft assessment atomically."""
+    with transaction.atomic():
+        locked = _locked_draft(test.pk)
+        selected = list(
+            QuestionBankQuestion.objects.select_for_update()
+            .filter(course=locked.course, pk__in=question_ids)
+            .order_by("pk")
+        )
+        if not selected or len(selected) != len(question_ids):
+            raise ImportConflict("Select questions from this course's question bank.")
+        existing = {
+            normalize_question_text(text)
+            for text in locked.questions.values_list("text", flat=True)
+        }
+        selected_texts = [normalize_question_text(item.text) for item in selected]
+        if len(selected_texts) != len(set(selected_texts)) or existing.intersection(selected_texts):
+            raise ImportConflict("The assessment already contains one or more selected questions.")
+        order = locked.questions.aggregate(highest=Max("order"))["highest"] or 0
+        for item in selected:
+            order += 1
+            question = Question.objects.create(
+                test=locked,
+                kind=Question.Kind.MCQ,
+                text=item.text,
+                marks=item.marks,
+                order=order,
+                question_type=item.question_type,
+            )
+            Choice.objects.bulk_create(
+                [
+                    Choice(question=question, text=text, order=position, is_correct=(position == item.correct_choice))
+                    for position, text in enumerate(item.choices, start=1)
+                ]
+            )
+    return len(selected)
 
 
 def delete_question(question):

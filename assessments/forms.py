@@ -3,9 +3,12 @@ Input validation for lecturers. Forms never carry course, creator, status, score
 timestamp that the server sets: those come from the URL object and the session.
 """
 
+from pathlib import Path
+
 from django import forms
 from django.utils import timezone
 
+from .importers import MAX_IMPORT_BYTES, SUPPORTED_EXTENSIONS
 from .models import MAX_DURATION_MINUTES, Question
 
 MAX_CHOICES = 5
@@ -55,7 +58,9 @@ class TestForm(forms.Form):
 
 
 class QuestionForm(forms.Form):
-    kind = forms.ChoiceField(choices=Question.Kind.choices, initial=Question.Kind.MCQ, label="Question type", required=False)
+    kind = forms.ChoiceField(
+        choices=Question.Kind.choices, initial=Question.Kind.MCQ, label="Response type", required=False
+    )
     text = forms.CharField(widget=forms.Textarea(attrs={"rows": 3}), max_length=2000)
     marks = forms.IntegerField(min_value=1, max_value=100, initial=1)
     marking_guide = forms.CharField(
@@ -67,6 +72,12 @@ class QuestionForm(forms.Form):
     )
     choice_1 = forms.CharField(max_length=500, label="Choice A", required=False)
     choice_2 = forms.CharField(max_length=500, label="Choice B", required=False)
+    question_type = forms.ChoiceField(
+        choices=Question.Type.choices,
+        initial=Question.Type.MULTIPLE_CHOICE,
+        required=False,
+        label="Choice format",
+    )
     choice_3 = forms.CharField(max_length=500, label="Choice C", required=False)
     choice_4 = forms.CharField(max_length=500, label="Choice D", required=False)
     choice_5 = forms.CharField(max_length=500, label="Choice E", required=False)
@@ -89,9 +100,11 @@ class QuestionForm(forms.Form):
     def clean(self):
         cleaned = super().clean()
         cleaned["kind"] = cleaned.get("kind") or Question.Kind.MCQ
+        cleaned["question_type"] = cleaned.get("question_type") or Question.Type.MULTIPLE_CHOICE
         if cleaned["kind"] != Question.Kind.MCQ:
             # Choices make no sense for these kinds; ignore anything submitted.
             cleaned["choices"], cleaned["correct"] = [], None
+            cleaned["question_type"] = Question.Type.MULTIPLE_CHOICE
             return cleaned
         cleaned["marking_guide"] = ""
         texts = []  # (position, text) for non-blank choices, positions kept so the key matches the letter
@@ -101,6 +114,8 @@ class QuestionForm(forms.Form):
                 texts.append((position, value))
         if len(texts) < MIN_CHOICES:
             raise forms.ValidationError(f"Provide at least {MIN_CHOICES} choices.")
+        if cleaned.get("question_type") == Question.Type.TRUE_FALSE and len(texts) != 2:
+            raise forms.ValidationError("True / false questions need exactly two choices.")
         lowered = [t.lower() for _, t in texts]
         if len(set(lowered)) != len(lowered):
             raise forms.ValidationError("Choices must all be different.")
@@ -124,9 +139,25 @@ class QuestionForm(forms.Form):
             "text": question.text,
             "marks": question.marks,
             "marking_guide": question.marking_guide,
+            "question_type": question.question_type,
         }
         for choice in question.choices.all():
             initial[f"choice_{choice.order}"] = choice.text
             if choice.is_correct:
                 initial["correct"] = str(choice.order)
         return cls(initial=initial)
+
+
+class AssessmentImportForm(TestForm):
+    file = forms.FileField(
+        widget=forms.ClearableFileInput(attrs={"accept": ".xlsx,.xls,.csv,.docx,.pdf,.xml"}),
+        help_text="Excel, CSV, Word (.docx), PDF, or Moodle XML; maximum 10 MB.",
+    )
+
+    def clean_file(self):
+        uploaded = self.cleaned_data["file"]
+        if Path(uploaded.name).suffix.casefold() not in SUPPORTED_EXTENSIONS:
+            raise forms.ValidationError("Choose an .xlsx, .xls, .csv, .docx, .pdf, or Moodle .xml file.")
+        if uploaded.size == 0 or uploaded.size > MAX_IMPORT_BYTES:
+            raise forms.ValidationError("The file must be non-empty and no larger than 10 MB.")
+        return uploaded

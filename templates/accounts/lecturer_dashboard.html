@@ -9,6 +9,11 @@
   <li>
     <a href="{% url 'accounts:course_detail' course.pk %}">{{ course.code }}</a> &ndash; {{ course.title }}
     ({{ course.department.name }}, {{ course.level }}){% if not course.is_active %} <em>inactive</em>{% endif %}
+    {% if course.is_active %}
+      &middot; <a href="{% url 'assessments:test_create' course.pk %}">New test</a>
+      &middot; <a href="{% url 'assessments:import_assessment' course.pk %}">Import assessment</a>
+    {% endif %}
+    &middot; <a href="{% url 'assessments:question_bank' course.pk %}">Question bank</a>
   </li>
   {% endfor %}
 </ul>
@@ -20,5 +25,11 @@
 <div class="card"><a href="{% url 'assessments:test_manage' test.pk %}">{{ test.title }}</a> <span class="tag">{{ test.get_status_display }}</span> <span class="muted">{{ test.course.code }}</span></div>
 {% empty %}
 <p>No tests yet. Open a course to create one.</p>
+{% endfor %}
+<h2>Recent imports</h2>
+{% for item in imports %}
+<div class="card">{{ item.course.code }} &middot; {{ item.file_name }} <span class="tag">{{ item.get_status_display }}</span> <span class="muted">{{ item.created_at }}</span></div>
+{% empty %}
+<p>No assessment imports yet.</p>
 {% endfor %}
 {% endblock %}

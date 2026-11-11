@@ -10,7 +10,7 @@
     header a { color: #fff; text-decoration: none; font-weight: 600; }
     main { max-width: 520px; margin: 2rem auto; background: #fff; padding: 1.5rem 2rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.12); }
     label { display: block; margin-top: .9rem; font-weight: 600; }
-    main.wide { max-width: 820px; }
+    main.wide { max-width: 1100px; }
     input, select, textarea { width: 100%; padding: .5rem; margin-top: .25rem; box-sizing: border-box; }
     input[type=radio] { width: auto; margin-right: .5rem; }
     textarea { padding: .5rem; margin-top: .25rem; box-sizing: border-box; font: inherit; }
@@ -28,6 +28,13 @@
     .help { color: #52606d; font-size: .8rem; }
     dl dt { font-weight: 600; margin-top: .8rem; }
     dl dd { margin: 0; }
+    fieldset { min-width: 0; border: 1px solid #d9dee4; border-radius: 6px; padding: 1rem; }
+    fieldset legend { font-weight: 600; padding: 0 .35rem; }
+    @media (max-width: 600px) {
+      header { padding: .75rem; }
+      main { margin: 1rem auto; padding: 1rem; }
+      main.wide { max-width: 100%; }
+    }
     form.inline { display: inline; }
     form.inline button { margin: 0; }
   </style>

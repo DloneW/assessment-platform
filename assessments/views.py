@@ -7,10 +7,12 @@ missing; a permitted manager attempting a state-invalid action (editing a publis
 redirect back with a message; tampered answer ids -> 400.
 """
 
+import hashlib
 import re
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
+from django.db import IntegrityError
 from django.db.models import Prefetch
 from django.http import Http404, HttpResponse, HttpResponseBadRequest
 from django.shortcuts import redirect, render
@@ -24,9 +26,12 @@ from authorization.enforcement import get_authorized_or_404
 
 from . import services, uploads
 from .forms import QuestionForm, TestForm
-from .models import AnswerFile, Attempt, Choice, Question, StudentAnswer, Test
+from .forms import AssessmentImportForm
+from .importers import ImportFormatError, MAX_IMPORT_QUESTIONS, parse_upload
+from .models import AnswerFile, Attempt, Choice, ImportHistory, Question, QuestionBankQuestion, StudentAnswer, Test
 
 FORM_METHODS = ["GET", "HEAD", "POST"]
+MAX_BANK_SELECTIONS = 500
 
 
 def _test_or_404(request, check, **lookup):
@@ -55,6 +60,307 @@ def create_test(request, course_pk):
         messages.success(request, "Draft created. Now add questions.")
         return redirect("assessments:test_manage", pk=test.pk)
     return render(request, "assessments/test_form.html", {"form": form, "course": course, "test": None})
+
+
+def _import_history(course, creator, file_name, file_hash):
+    try:
+        return ImportHistory.objects.create(
+            course=course, creator=creator, file_name=file_name[:255], file_hash=file_hash
+        )
+    except IntegrityError:
+        return None
+
+
+def _decorate_import_rows(rows, course):
+    """Attach row errors and stable A-E input fields to editable preview data."""
+    seen = set()
+    existing = {
+        services.normalize_question_text(text)
+        for text in (
+            *Question.objects.filter(test__course=course).values_list("text", flat=True),
+            *QuestionBankQuestion.objects.filter(course=course).values_list("text", flat=True),
+        )
+    }
+    decorated = []
+    for row in rows:
+        row = dict(row)
+        row.setdefault("errors", [])
+        row["errors"] = list(row["errors"])
+        text = services.normalize_question_text(row.get("text", ""))
+        if text and text in seen:
+            row["errors"].append("Duplicate question in this upload.")
+        if text and text in existing:
+            row["errors"].append("This question already exists in this course.")
+        if text:
+            seen.add(text)
+        row["choice_fields"] = [
+            {"letter": chr(65 + index), "value": row.get("choices", [])[index] if index < len(row.get("choices", [])) else ""}
+            for index in range(5)
+        ]
+        decorated.append(row)
+    return decorated
+
+
+def _posted_import_rows(request, course):
+    raw_count = request.POST.get("question_count", "")
+    if not re.fullmatch(r"[0-9]{1,3}", raw_count):
+        return [], ["The preview is invalid. Upload the file again."]
+    count = int(raw_count)
+    if not 1 <= count <= MAX_IMPORT_QUESTIONS:
+        return [], [f"Select at least one question and no more than {MAX_IMPORT_QUESTIONS}."]
+    rows = []
+    errors = []
+    for index in range(count):
+        if request.POST.get(f"delete_{index}") == "on":
+            continue
+        text = request.POST.get(f"question_{index}_text", "").strip()
+        category = request.POST.get(f"question_{index}_category", "").strip()
+        question_type = request.POST.get(f"question_{index}_type", "")
+        raw_marks = request.POST.get(f"question_{index}_marks", "")
+        if not re.fullmatch(r"[0-9]{1,3}", raw_marks):
+            marks = 0
+        else:
+            marks = int(raw_marks)
+        source_choices = [request.POST.get(f"question_{index}_choice_{letter}", "").strip() for letter in "ABCDE"]
+        correct_raw = request.POST.get(f"question_{index}_correct", "")
+        if not re.fullmatch(r"[1-5]", correct_raw):
+            correct_source = 0
+        else:
+            correct_source = int(correct_raw)
+        selected_choices = [(position, value) for position, value in enumerate(source_choices, 1) if value]
+        compact_choices = [value for _, value in selected_choices]
+        correct = next(
+            (position for position, (source_position, _) in enumerate(selected_choices, 1) if source_position == correct_source),
+            0,
+        )
+        row_errors = []
+        if not text:
+            row_errors.append("Question text is required.")
+        if len(text) > 2000:
+            row_errors.append("Question text cannot exceed 2,000 characters.")
+        if len(category) > 100:
+            row_errors.append("Category cannot exceed 100 characters.")
+        if not 2 <= len(compact_choices) <= 5:
+            row_errors.append("Provide 2 to 5 non-empty answer options.")
+        if any(len(choice) > 500 for choice in compact_choices):
+            row_errors.append("Answer options cannot exceed 500 characters.")
+        if len({choice.casefold() for choice in compact_choices}) != len(compact_choices):
+            row_errors.append("Answer options must be different.")
+        if not 1 <= marks <= 100:
+            row_errors.append("Marks must be between 1 and 100.")
+        if not 1 <= correct <= len(compact_choices):
+            row_errors.append("Select a correct answer that has an option.")
+        if question_type not in Question.Type.values:
+            row_errors.append("Select a supported question type.")
+        elif question_type == Question.Type.TRUE_FALSE and len(compact_choices) != 2:
+            row_errors.append("True / false questions need exactly two options.")
+        rows.append(
+            {
+                "text": text,
+                "choices": compact_choices,
+                "correct": correct,
+                "marks": marks,
+                "category": category,
+                "question_type": question_type,
+                "errors": row_errors,
+            }
+        )
+    rows = _decorate_import_rows(rows, course)
+    for index, row in enumerate(rows, start=1):
+        if row["errors"]:
+            errors.extend(f"Question {index}: {message}" for message in row["errors"])
+    if not rows:
+        errors.append("Select at least one question to import.")
+    return rows, errors
+
+
+@require_http_methods(FORM_METHODS)
+@login_required
+def import_assessment(request, course_pk):
+    course = get_authorized_or_404(
+        request.user, authz.can_create_test, Course.objects.select_related("department", "level"), pk=course_pk
+    )
+    if request.method == "GET":
+        return render(
+            request,
+            "assessments/import_assessment.html",
+            {"form": AssessmentImportForm(), "course": course},
+        )
+
+    if request.POST.get("action") == "save":
+        form = TestForm(request.POST)
+        import_id = request.POST.get("import_id", "")
+        history = ImportHistory.objects.filter(
+            pk=int(import_id) if re.fullmatch(r"[0-9]{1,18}", import_id) else None,
+            course=course,
+            creator=request.user,
+            status=ImportHistory.Status.PREVIEWED,
+        ).first()
+        if history is None:
+            form.add_error(None, "This import preview has expired. Upload the file again.")
+            return render(request, "assessments/import_assessment.html", {"form": form, "course": course})
+        rows, row_errors = _posted_import_rows(request, course)
+        if not form.is_valid() or row_errors:
+            history.details = "\n".join(row_errors)[:5000]
+            history.save(update_fields=["details"])
+            return render(
+                request,
+                "assessments/import_preview.html",
+                {"form": form, "course": course, "history": history, "questions": rows, "row_errors": row_errors},
+            )
+        try:
+            test = services.save_imported_assessment(
+                course=course,
+                creator=request.user,
+                cleaned=form.cleaned_data,
+                questions=rows,
+                history_id=history.pk,
+            )
+        except (services.ImportConflict, ImportHistory.DoesNotExist) as exc:
+            form.add_error(None, str(exc) or "This import preview is no longer available.")
+            return render(
+                request,
+                "assessments/import_preview.html",
+                {"form": form, "course": course, "history": history, "questions": rows, "row_errors": [str(exc)]},
+            )
+        messages.success(request, f"Imported {len(rows)} questions into a new draft assessment.")
+        return redirect("assessments:test_manage", pk=test.pk)
+
+    form = AssessmentImportForm(request.POST, request.FILES)
+    if not form.is_valid():
+        return render(request, "assessments/import_assessment.html", {"form": form, "course": course})
+    upload = form.cleaned_data["file"]
+    raw = upload.read()
+    upload.seek(0)
+    file_hash = hashlib.sha256(raw).hexdigest()
+    history = ImportHistory.objects.filter(course=course, creator=request.user, file_hash=file_hash).first()
+    if history is not None and history.status != ImportHistory.Status.PREVIEWED:
+        form.add_error("file", "This file has already been processed or has an active preview.")
+        return render(request, "assessments/import_assessment.html", {"form": form, "course": course})
+    if history is None:
+        history = _import_history(course, request.user, upload.name, file_hash)
+        if history is None:
+            history = ImportHistory.objects.filter(course=course, creator=request.user, file_hash=file_hash).first()
+        if history is None or history.status != ImportHistory.Status.PREVIEWED:
+            form.add_error("file", "This file has already been processed.")
+            return render(request, "assessments/import_assessment.html", {"form": form, "course": course})
+    elif history.file_name != upload.name[:255]:
+        history.file_name = upload.name[:255]
+        history.save(update_fields=["file_name"])
+    try:
+        questions = parse_upload(upload)
+    except ImportFormatError as exc:
+        ImportHistory.objects.filter(pk=history.pk, status=ImportHistory.Status.PREVIEWED).update(
+            status=ImportHistory.Status.FAILED, details=str(exc)
+        )
+        form.add_error("file", str(exc))
+        return render(
+            request,
+            "assessments/import_assessment.html",
+            {"form": form, "course": course, "history": history},
+        )
+    decorated = _decorate_import_rows(questions, course)
+    details = "\n".join(
+        f"Question {index}: {message}"
+        for index, question in enumerate(decorated, start=1)
+        for message in question["errors"]
+    )[:5000]
+    updated = ImportHistory.objects.filter(pk=history.pk, status=ImportHistory.Status.PREVIEWED).update(
+        question_count=len(decorated), details=details
+    )
+    if not updated:
+        form.add_error("file", "This import has already been processed.")
+        return render(request, "assessments/import_assessment.html", {"form": form, "course": course})
+    history.question_count = len(decorated)
+    history.details = details
+    return render(
+        request,
+        "assessments/import_preview.html",
+        {
+            "form": form,
+            "course": course,
+            "history": history,
+            "questions": decorated,
+            "row_errors": [],
+        },
+    )
+
+
+@require_safe
+@login_required
+def import_template(request):
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Questions"
+    sheet.append(["Question", "Question Type", "A", "B", "C", "D", "E", "Correct Answer", "Marks", "Category"])
+    sheet.append(["What is 2 + 2?", "MULTIPLE_CHOICE", "3", "4", "5", "", "", "B", 1, "Example"])
+    sheet.freeze_panes = "A2"
+    sheet.auto_filter.ref = "A1:J2"
+    output = BytesIO()
+    workbook.save(output)
+    response = HttpResponse(
+        output.getvalue(),
+        content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    response["Content-Disposition"] = 'attachment; filename="assessment-question-template.xlsx"'
+    return response
+
+
+@require_http_methods(["GET", "POST"])
+@login_required
+def question_bank(request, course_pk):
+    course = get_authorized_or_404(request.user, authz.can_manage_course, Course.objects.all(), pk=course_pk)
+    draft_tests = course.tests.filter(status=Test.Status.DRAFT).order_by("title")
+    if request.method == "POST":
+        raw_ids = request.POST.getlist("question_ids")
+        if len(raw_ids) > MAX_BANK_SELECTIONS or any(not re.fullmatch(r"[0-9]{1,18}", value) for value in raw_ids):
+            messages.error(request, f"Select up to {MAX_BANK_SELECTIONS} valid bank questions.")
+            return redirect("assessments:question_bank", course_pk=course.pk)
+        test = get_authorized_or_404(
+            request.user,
+            authz.can_edit_test,
+            Test.objects.select_related("course"),
+            pk=int(request.POST["test_id"])
+            if re.fullmatch(r"[0-9]{1,18}", request.POST.get("test_id", ""))
+            else None,
+        )
+        if test.course_id != course.pk:
+            raise Http404
+        try:
+            added = services.add_bank_questions(test, [int(value) for value in raw_ids])
+        except services.ImportConflict as exc:
+            messages.error(request, str(exc))
+        else:
+            messages.success(request, f"Added {added} question{'s' if added != 1 else ''} to {test.title}.")
+            return redirect("assessments:test_manage", pk=test.pk)
+    questions = QuestionBankQuestion.objects.filter(course=course)
+    search = request.GET.get("q", "").strip()
+    category = request.GET.get("category", "").strip()
+    if search:
+        questions = questions.filter(text__icontains=search)
+    if category:
+        questions = questions.filter(category=category)
+    return render(
+        request,
+        "assessments/question_bank.html",
+        {
+            "course": course,
+            "questions": questions,
+            "search": search,
+            "selected_category": category,
+            "categories": QuestionBankQuestion.objects.filter(course=course)
+            .exclude(category="")
+            .order_by("category")
+            .values_list("category", flat=True)
+            .distinct(),
+            "draft_tests": draft_tests,
+            "history": ImportHistory.objects.filter(course=course)[:20],
+        },
+    )
 
 
 @require_safe
